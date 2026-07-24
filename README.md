@@ -61,9 +61,16 @@ Every tool call is logged with exact and relative timestamps, duration, and outc
 Run it directly, no clone needed — this builds and starts it from wherever you run the command:
 
 ```bash
-npx github:lloyd-aloysius/mcp-gateway
-# or, once published to npm:
 npx @lloyd-aloysius/mcp-gateway
+# or straight from GitHub, no npm needed:
+npx github:lloyd-aloysius/mcp-gateway
+```
+
+Prefer a persistent install over `npx` re-fetching each time?
+
+```bash
+npm install -g @lloyd-aloysius/mcp-gateway
+mcp-gateway
 ```
 
 Or clone it if you want to poke at the source:
