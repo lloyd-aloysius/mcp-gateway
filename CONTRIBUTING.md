@@ -94,6 +94,16 @@ correctness, not feature correctness.
   *what* — the diff already shows what changed.
 - Reference the issue you're fixing, if there is one.
 
+## Releases & versioning
+
+This project follows [semantic versioning](https://semver.org/). Releases are
+cut by the maintainer, not by individual PRs — when a version tag (e.g.
+`v1.2.0`) is pushed, CI automatically runs the full check suite, publishes
+the package to npm, and creates the matching GitHub Release with
+auto-generated notes. As a contributor you don't need to bump versions or
+publish anything yourself; just focus on the PR and it'll ship in the next
+release.
+
 ## Reporting bugs / requesting features
 
 Use the GitHub issue templates. For anything security-related, see
