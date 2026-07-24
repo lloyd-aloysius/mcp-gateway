@@ -2,6 +2,10 @@
   "name": "@lloyd-aloysius/mcp-gateway",
   "version": "0.1.1",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lloyd-aloysius/mcp-gateway"
+  },
   "engines": {
     "node": ">=20.9.0"
   },
