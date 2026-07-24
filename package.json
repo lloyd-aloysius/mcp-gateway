@@ -1,7 +1,6 @@
 {
-  "name": "@lloyd_dexter/mcp-gateway",
+  "name": "@lloyd-aloysius/mcp-gateway",
   "version": "0.1.0",
-  "private": true,
   "license": "MIT",
   "engines": {
     "node": ">=20.9.0"

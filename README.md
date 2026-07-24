@@ -63,7 +63,7 @@ Run it directly, no clone needed — this builds and starts it from wherever you
 ```bash
 npx github:lloyd-aloysius/mcp-gateway
 # or, once published to npm:
-npx @lloyd_dexter/mcp-gateway
+npx @lloyd-aloysius/mcp-gateway
 ```
 
 Or clone it if you want to poke at the source:
