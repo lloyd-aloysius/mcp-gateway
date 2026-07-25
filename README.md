@@ -8,11 +8,36 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 
 ## Features
 
-- **Backend server management** — connect stdio (local command), Streamable HTTP, or SSE MCP servers from the dashboard; live connection status with auto-reconnect for remote servers.
-- **Client endpoints** — create as many unique URL + token pairs as you need, each with its own default access policy (allow-all-then-restrict, or deny-all-then-grant) and per-server overrides.
-- **Live network diagram** — the homepage shows every backend server and client endpoint as a live topology graph, with animated pulses on the edges as tool calls flow through in real time.
-- **Full audit log** — every tool call, resource read, and prompt fetch is logged (including denials), filterable by endpoint/server/status/name, with CSV export.
-- **Copy-paste client config** — each endpoint's settings page generates the ready-to-use `mcpServers` JSON block (and the equivalent `claude mcp add` command) with the endpoint's own URL and token.
+### Backend servers
+
+- **Any transport** — connect stdio (local command), Streamable HTTP, or SSE MCP servers from the dashboard, with live connection status and auto-reconnect for remote servers.
+- **Guided add-server form, or paste an existing config** — already have a working MCP config for another client? Paste it and the guided form pre-fills for review instead of manually re-typing commands, env vars, or headers.
+- **Edit in place** — change a server's command, arguments, environment variables, or headers after creation without deleting and re-adding it.
+- **Per-tool kill switch** — disable individual tools on a server; a disabled tool disappears from every endpoint's tool list and is blocked from being called, regardless of that endpoint's access policy.
+- **One-click and bulk reconnect** — reconnect a single server or every enabled server at once, without restarting the gateway process.
+- **Built-in admin server** — a "Gateway Server Tools" server auto-seeds on first boot, exposing health-check tools (`ping`, `gateway_status`) plus `list_backend_servers` and `add_backend_server` — meaning an MCP client with access can introspect and register new backend servers through natural conversation, not just the dashboard. Fully manageable (edit/disable/delete/reconnect) like any other server.
+
+### Client endpoints & access control
+
+- **Unique URL + token per client** — create as many endpoints as you need; each gets its own bearer token, stored as a SHA-256 hash and shown in full exactly once.
+- **Two default policies** — allow-everything-then-restrict, or deny-everything-then-grant, set per endpoint.
+- **Per-server override rules** — a 3-state table (Allow / Deny / Inherit default) per backend server, evaluated fresh on *every* call rather than cached into a session's tool list — a rule change takes effect on the client's next call, no gateway restart needed.
+- **Connected-client tracking** — endpoints identify distinct callers via an `X-MCP-Client-Id` header (or a random fallback if a client doesn't send one), so one endpoint shared across, say, both Claude Desktop and Claude Code shows each as a separate tracked client with its own last-seen time.
+- **Ready-to-copy client config** — a config panel with `mcp.json` / Claude CLI / Tailscale tabs; the server entry name shown to clients is always the fixed `mcp-gateway`, so renaming an endpoint in the dashboard never breaks an already-configured client.
+
+### Live visualization & audit
+
+- **Real-time network diagram** — the homepage shows every backend server, the gateway, every client endpoint, and every connected client as a live topology graph, with animated pulses traveling along the edges as tool calls actually flow through — denied calls visibly stop at the gateway instead of continuing to the backend, and concurrent calls on the same edge are tracked independently.
+- **Live activity feed** — a real-time, animated log of the most recent calls alongside the diagram, driven by the same Server-Sent Events stream.
+- **Full audit log** — every tool call, resource read, and prompt fetch is recorded, including denials, with exact and relative timestamps, duration, and outcome. Filterable by endpoint, server, client, and status, with free-text search and CSV export.
+
+### Security & deployment
+
+- **No stored plaintext where it's avoidable** — endpoint tokens are hashed (SHA-256) at rest, never stored or retrievable in plaintext after creation.
+- **CSRF-protected admin API** — mutating admin requests are checked against the app's own origin, closing off the class of attack where a malicious webpage tries to reach the locally-bound dashboard through a victim's browser.
+- **Tailscale-aware** — detects an active tailnet connection and surfaces the real MagicDNS hostname/IP on the Settings page, with a dedicated config tab for Tailscale-based remote client access.
+- **Runs anywhere Node runs** — install via `npx`, `npm install -g`, or clone-and-run; ships as a self-contained CLI with no separate build step for consumers, automatic SQLite creation and migrations on first boot, and `.env`-based configuration.
+- **CI-verified releases** — every push runs typecheck/lint/build; tagged releases automatically publish to npm (via OIDC Trusted Publishing — no stored npm token) and create a GitHub Release with auto-generated notes.
 
 ## Screenshots
 
@@ -120,6 +145,8 @@ Copy `.env.example` to `.env` to override defaults:
 ## Security notes
 
 There is **no login on this dashboard** — it's designed for personal, single-user, self-hosted use, not multi-tenant deployment. Anyone who can reach the dashboard's URL can manage servers, endpoints, and tokens. Keep it bound to `127.0.0.1` (the default) or behind your own firewall/VPN/SSH tunnel if you need remote access — the Settings page shows a warning if it detects it's being accessed from somewhere other than localhost.
+
+The admin API also rejects cross-origin requests (mismatched `Origin` header) on all mutating routes, so a malicious page in another browser tab can't reach it even while the dashboard is open — that's a defense against a browser being used as a confused deputy, not a substitute for the network boundary above.
 
 Client endpoint tokens are stored as SHA-256 hashes, never in plaintext — a token is shown once at creation (or after a regeneration) and cannot be retrieved again afterward.
 
