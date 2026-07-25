@@ -3,8 +3,9 @@
 // migration SQL folder and the gateway-tools-server.mjs script (spawned as a
 // separate child process, never imported). Copy them in manually, alongside
 // the two folders Next's own docs say to copy by hand (public/, .next/static).
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import { nodeFileTrace } from "@vercel/nft";
 
 const root = process.cwd();
 const standalone = path.join(root, ".next", "standalone");
@@ -19,11 +20,6 @@ const copies = [
   [path.join(".next", "static"), path.join(".next", "static")],
   ["drizzle", "drizzle"],
   ["scripts", "scripts"],
-  // gateway-tools-server.mjs is spawned as its own plain `node` process, not
-  // bundled by webpack like the rest of the server — so unlike everything
-  // else the SDK isn't traced/inlined for it, and it needs a real,
-  // resolvable node_modules copy alongside it.
-  [path.join("node_modules", "@modelcontextprotocol"), path.join("node_modules", "@modelcontextprotocol")],
   // Next's standalone output tracing doesn't pick up instrumentation.js —
   // confirmed empirically (it's absent from .next/standalone/.next/server
   // even though next-server.js explicitly looks for it there at
@@ -57,4 +53,81 @@ if (existsSync(chunksSrc)) {
     filter: (src) => !src.endsWith(".map"),
   });
   console.log("copy-standalone-assets: .next/server/chunks -> .next/standalone/.next/server/chunks (merged)");
+}
+
+// gateway-tools-server.mjs is spawned as its own plain `node` process, not
+// bundled by webpack like the rest of the server — so unlike everything
+// else, its imports (the whole MCP SDK, and every one of *its* transitive
+// dependencies, several layers deep — zod, ajv, ajv's own nested
+// fast-deep-equal, and so on) aren't traced/inlined for it at all. It needs
+// a real, fully-resolvable node_modules tree alongside it.
+//
+// Hand-vendoring package names here turned into real whack-a-mole (each
+// fix surfaced the *next* missing transitive dependency one boot-failure
+// at a time) - some of this dependency tree used to resolve by accident
+// only because those packages were also declared as one of *our* top-level
+// dependencies. Now that runtime deps are properly minimized (everything's
+// self-contained in this standalone output), that accidental resolution
+// path is gone. Instead of maintaining that list by hand, use @vercel/nft -
+// the same file-tracing library Next.js itself uses internally for
+// standalone output - to compute the script's actual full dependency
+// closure, and copy exactly those files.
+const { fileList, warnings } = await nodeFileTrace([path.join(root, "scripts", "gateway-tools-server.mjs")], {
+  base: root,
+});
+for (const warning of warnings) {
+  console.warn(`copy-standalone-assets: nft warning: ${warning.message}`);
+}
+let tracedCount = 0;
+for (const file of fileList) {
+  if (!file.startsWith("node_modules")) continue; // scripts/ itself already copied above
+  const src = path.join(root, file);
+  const dest = path.join(standalone, file);
+  mkdirSync(path.dirname(dest), { recursive: true });
+  cpSync(src, dest);
+  tracedCount++;
+}
+console.log(`copy-standalone-assets: vendored ${tracedCount} traced dependency files for gateway-tools-server.mjs`);
+
+// Turbopack externalizes better-sqlite3 (correctly — it's in
+// serverExternalPackages) but references it under a hashed synthetic name
+// (e.g. "better-sqlite3-90e2652d1716b047") instead of the plain package
+// name, and generates a matching aliased directory at
+// .next/standalone/.next/node_modules/<hashed-name>. That path contains a
+// "node_modules" segment, so `npm publish` silently drops it regardless of
+// the "files" allowlist — npm never packs anything nested under a
+// node_modules directory unless it's a declared bundled dependency. The
+// result: every published tarball references a module that doesn't exist
+// in it, and the app 500s on first request. Confirmed by extracting the
+// real published 0.1.1 tarball and finding the reference with no target.
+//
+// The real, correctly-named package IS present at
+// .next/standalone/node_modules/better-sqlite3 (npm doesn't strip that one
+// — no node_modules segment above it within the packed tree). So instead
+// of trying to preserve the hashed alias directory, rewrite every
+// reference back to the plain name across the compiled server output.
+const hashedRefPattern = /better-sqlite3-[a-f0-9]{8,}/g;
+let rewrittenFiles = 0;
+
+function rewriteHashedSqliteRefs(dir) {
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    const stat = statSync(full);
+    if (stat.isDirectory()) {
+      if (entry === "node_modules") continue; // never rewrite inside vendored packages
+      rewriteHashedSqliteRefs(full);
+    } else if (entry.endsWith(".js")) {
+      const content = readFileSync(full, "utf8");
+      if (hashedRefPattern.test(content)) {
+        writeFileSync(full, content.replace(hashedRefPattern, "better-sqlite3"));
+        rewrittenFiles++;
+      }
+    }
+  }
+}
+
+const serverDir = path.join(standalone, ".next", "server");
+if (existsSync(serverDir)) {
+  rewriteHashedSqliteRefs(serverDir);
+  console.log(`copy-standalone-assets: rewrote hashed better-sqlite3 alias in ${rewrittenFiles} file(s)`);
 }
