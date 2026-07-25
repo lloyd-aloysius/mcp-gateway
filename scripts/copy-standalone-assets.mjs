@@ -29,6 +29,24 @@ const copies = [
     path.join(".next", "server", "instrumentation.js"),
     path.join(".next", "server", "instrumentation.js"),
   ],
+  // better-sqlite3's own npm package ships prebuilt native bindings for
+  // every platform/arch it supports (confirmed by inspecting the real
+  // registry tarball directly - all 8: darwin/linux/linuxmusl/win32 x
+  // x64/arm64). But Next's standalone tracing resolves getPrebuildPath()'s
+  // dynamic `${platform}-${arch}.node` lookup against whichever machine
+  // actually runs the build, and only copies that one file - confirmed
+  // empirically: a build on this (arm64) Mac produced a standalone output
+  // containing only darwin-arm64.node. Since CI publishes from a Linux x64
+  // runner, every previously-published tarball shipped only an x64 Linux
+  // binary, silently breaking every other platform (Apple Silicon Macs
+  // included) with a cryptic "cannot find module .../build/Release/..."
+  // error, no matter which machine built the release. Copy the whole
+  // prebuilds directory ourselves so the platform that happens to run the
+  // build stops mattering at all.
+  [
+    path.join("node_modules", "better-sqlite3", "prebuilds"),
+    path.join("node_modules", "better-sqlite3", "prebuilds"),
+  ],
 ];
 
 for (const [from, to] of copies) {
