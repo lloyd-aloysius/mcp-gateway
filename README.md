@@ -111,6 +111,23 @@ Either way, open [http://localhost:3000](http://localhost:3000). The SQLite data
 
 Add a backend server from the **Servers** page (e.g. `npx -y @modelcontextprotocol/server-everything` as a stdio server), then create a **client endpoint** and copy its config into your MCP client.
 
+## Docker
+
+A `Dockerfile` is included for running the gateway in a container instead of installing Node locally:
+
+```bash
+git clone <this-repo>
+cd mcp-gateway
+docker build -t mcp-gateway .
+docker run -d --name mcp-gateway -p 3000:3000 -v mcp-gateway-data:/data mcp-gateway
+```
+
+Open [http://localhost:3000](http://localhost:3000). The `-v mcp-gateway-data:/data` volume is where the SQLite database lives — keep it (don't use `--rm`) so your servers, endpoints, and audit history survive container restarts and image updates.
+
+The image is Alpine-based (musl libc) on purpose: `better-sqlite3`'s native binding ships separate prebuilds per platform, and its arm64 Linux build requires a newer glibc than its x64 build does — a gap that doesn't exist on musl, so this image works identically on x64 and arm64 hosts regardless of the host's own glibc version.
+
+Override the port with `-e PORT=8080 -p 8080:8080`, or point at a custom database location with `-e DATABASE_PATH=/data/gateway.db` (already the default).
+
 ## Architecture
 
 Everything runs in a single Next.js process:
