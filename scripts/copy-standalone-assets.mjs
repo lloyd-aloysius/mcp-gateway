@@ -58,6 +58,21 @@ for (const [from, to] of copies) {
   console.log(`copy-standalone-assets: ${from} -> .next/standalone/${to}`);
 }
 
+// Upstream's better-sqlite3 arm64 Linux prebuild needs glibc >= 2.38, while
+// their x64 Linux prebuild only needs >= 2.34 - a mismatch baked into their
+// own binaries, not this project. That excludes arm64 hosts on Debian 12,
+// Ubuntu 22.04, RHEL 9, and Amazon Linux 2023 even though the identical x64
+// host on the same distro works fine. Overwrite just that one file with our
+// own rebuild (see vendor/better-sqlite3-prebuilds/README.md for how it was
+// built and how to regenerate it) - verified to need only glibc >= 2.29,
+// lower than even the x64 build's own floor.
+const arm64Override = path.join(root, "vendor", "better-sqlite3-prebuilds", "linux-arm64.node");
+if (existsSync(arm64Override)) {
+  const dest = path.join(standalone, "node_modules", "better-sqlite3", "prebuilds", "linux-arm64.node");
+  cpSync(arm64Override, dest);
+  console.log("copy-standalone-assets: vendored linux-arm64.node override -> .next/standalone (glibc >=2.29 instead of upstream's >=2.38)");
+}
+
 // instrumentation.js's own Turbopack runtime chunk isn't in the standalone
 // build's already-trimmed chunks dir either (also empirically confirmed —
 // tracing only followed the page/route entry points, not this one). Merge
