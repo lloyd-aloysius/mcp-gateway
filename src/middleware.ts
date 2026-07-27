@@ -26,9 +26,31 @@ export function middleware(req: NextRequest) {
   // tools calling the admin API directly (curl, scripts) typically don't -
   // that's an already-intended use of this no-login local API, not the
   // browser-driven vector this blocks, so an absent Origin is allowed.
+  //
+  // Compare against the request's own Host header, not req.nextUrl.origin -
+  // nextUrl.origin reflects the HOSTNAME the server was started with (e.g.
+  // "127.0.0.1" gets displayed/treated as "localhost"), not the address the
+  // browser actually used to reach it. That made this check reject same-origin
+  // requests in the most common real deployments: visiting via 127.0.0.1
+  // instead of the literal string "localhost", any Docker setup (HOSTNAME is
+  // typically 0.0.0.0, which no browser ever sends as an Origin), a LAN IP, or
+  // a Tailscale hostname. A browser always sets Host to the authority it
+  // connected to and Origin to the initiating page's origin, and page JS can
+  // forge neither - so comparing their host:port strings directly holds for
+  // exactly same-origin requests, regardless of which valid address reached
+  // the server.
   const origin = req.headers.get("origin");
-  if (origin && origin !== req.nextUrl.origin) {
-    return NextResponse.json({ error: "Cross-origin requests are not allowed" }, { status: 403 });
+  if (origin) {
+    const host = req.headers.get("host");
+    let originHost: string | null;
+    try {
+      originHost = new URL(origin).host;
+    } catch {
+      originHost = null;
+    }
+    if (!host || originHost !== host) {
+      return NextResponse.json({ error: "Cross-origin requests are not allowed" }, { status: 403 });
+    }
   }
 
   // Only enforce Content-Type when a body was actually sent - several
