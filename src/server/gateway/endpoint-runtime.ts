@@ -18,15 +18,12 @@ import {
   dispatchListPrompts,
   dispatchGetPrompt,
 } from "./dispatch";
+import { setSession, deleteSession, getSessionEntry } from "./session-registry";
 
-interface SessionEntry {
-  server: Server;
-  transport: WebStandardStreamableHTTPServerTransport;
-  endpointId: string;
-  clientId: string;
-}
-
-const sessions = new Map<string, SessionEntry>();
+export {
+  getActiveSessionCount,
+  getActiveSessionCountByEndpoint,
+} from "./session-registry";
 
 function buildServer(
   endpoint: ClientEndpoint,
@@ -84,7 +81,7 @@ export async function handleMcpRequest(endpoint: ClientEndpoint, req: Request): 
   const sessionId = req.headers.get("mcp-session-id");
 
   if (sessionId) {
-    const entry = sessions.get(sessionId);
+    const entry = getSessionEntry(sessionId);
     if (!entry || entry.endpointId !== endpoint.id) {
       return new Response(
         JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Session not found" }, id: null }),
@@ -99,31 +96,19 @@ export async function handleMcpRequest(endpoint: ClientEndpoint, req: Request): 
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: (sid) => {
-      sessions.set(sid, { server, transport, endpointId: endpoint.id, clientId });
+      setSession(sid, { server, transport, endpointId: endpoint.id, clientId });
     },
     onsessionclosed: (sid) => {
-      sessions.delete(sid);
+      deleteSession(sid);
     },
   });
 
   const server = buildServer(
     endpoint,
     () => transport.sessionId ?? null,
-    () => sessions.get(transport.sessionId ?? "")?.clientId ?? null
+    () => getSessionEntry(transport.sessionId ?? "")?.clientId ?? null
   );
   await server.connect(transport);
 
   return transport.handleRequest(req);
-}
-
-export function getActiveSessionCount(): number {
-  return sessions.size;
-}
-
-export function getActiveSessionCountByEndpoint(): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const entry of sessions.values()) {
-    counts.set(entry.endpointId, (counts.get(entry.endpointId) ?? 0) + 1);
-  }
-  return counts;
 }

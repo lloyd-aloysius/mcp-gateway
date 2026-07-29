@@ -4,10 +4,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { ElicitRequestSchema, CreateMessageRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { db } from "../db/client";
 import { backendServers, type BackendServer } from "../db/schema";
 import { emitGatewayEvent } from "../events/bus";
 import { BUILTIN_GATEWAY_TOOLS_SERVER_KEY } from "./seed-builtin-server";
+import { relayElicitation, relaySampling } from "./elicitation-sampling-relay";
 
 const RECONNECT_INITIAL_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
@@ -105,7 +107,24 @@ export class BackendConnection {
     if (this.closed) return;
     this.setStatus("connecting");
     try {
-      const client = new Client({ name: "mcp-gateway", version: "0.1.0" });
+      // Declared unconditionally on every backend connection - a harmless
+      // no-op for backends that never send these requests. Capabilities are
+      // fixed at construction and only sent during the initialize handshake,
+      // so this (and the handler registration below) has to happen here,
+      // inside connect(), rather than once at some outer scope - connect()
+      // constructs a brand new Client on every reconnect, and a reconnected
+      // backend would otherwise silently lose elicitation/sampling support
+      // until the whole process restarted.
+      const client = new Client(
+        { name: "mcp-gateway", version: "0.1.0" },
+        { capabilities: { sampling: {}, elicitation: { form: {} } } }
+      );
+      // this.id is stable across reconnects (it's the backend_servers row
+      // id), so in-flight calls registered against it in dispatch.ts stay
+      // resolvable by relayElicitation/relaySampling regardless of which
+      // Client instance is currently handling them.
+      client.setRequestHandler(ElicitRequestSchema, (request) => relayElicitation(this.id, request.params));
+      client.setRequestHandler(CreateMessageRequestSchema, (request) => relaySampling(this.id, request.params));
       const transport = this.buildTransport();
       await client.connect(transport);
       this.client = client;

@@ -142,6 +142,8 @@ export const auditLog = sqliteTable("audit_log", {
       "prompts/get",
       "connect",
       "disconnect",
+      "elicitation/create",
+      "sampling/createMessage",
     ],
   }).notNull(),
   itemName: text("item_name"),

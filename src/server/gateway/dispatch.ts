@@ -1,18 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { eq, and } from "drizzle-orm";
 import { db } from "../db/client";
-import {
-  auditLog,
-  backendServers,
-  backendServerTools,
-  clientEndpoints,
-  endpointClients,
-  type ClientEndpoint,
-} from "../db/schema";
+import { backendServerTools, type ClientEndpoint } from "../db/schema";
 import { encodeName, decodeName, encodeResourceUri, decodeResourceUri } from "./namespacing";
 import { evaluateAccess } from "./access-control";
 import { getAllConnections, getConnectionByKey, type BackendConnection } from "./backend-registry";
-import { prepareArgsForAudit } from "../audit/redact";
+import { registerInFlightCall, unregisterInFlightCall } from "./in-flight-calls";
+import { recordAudit, getServerRow } from "./dispatch-shared";
 import { emitGatewayEvent } from "../events/bus";
 
 async function getDisabledToolNames(backendServerId: string): Promise<Set<string>> {
@@ -31,11 +25,6 @@ export class DispatchError extends Error {
   }
 }
 
-async function getServerRow(serverId: string) {
-  const [row] = await db.select().from(backendServers).where(eq(backendServers.id, serverId)).limit(1);
-  return row ?? null;
-}
-
 async function allowedConnections(endpoint: ClientEndpoint): Promise<BackendConnection[]> {
   const conns = getAllConnections();
   const results = await Promise.allSettled(
@@ -50,72 +39,6 @@ async function allowedConnections(endpoint: ClientEndpoint): Promise<BackendConn
     .filter((r): r is PromiseFulfilledResult<BackendConnection | null> => r.status === "fulfilled")
     .map((r) => r.value)
     .filter((c): c is BackendConnection => c !== null && c.status === "connected" && c.client !== null);
-}
-
-async function recordAudit(entry: {
-  endpoint: ClientEndpoint;
-  backendServerId?: string | null;
-  backendServerKey?: string | null;
-  sessionId?: string | null;
-  clientId?: string | null;
-  operationType:
-    | "tools/list"
-    | "tools/call"
-    | "resources/list"
-    | "resources/read"
-    | "prompts/list"
-    | "prompts/get";
-  itemName?: string | null;
-  args?: unknown;
-  status: "success" | "error" | "denied";
-  durationMs?: number;
-  errorMessage?: string;
-}) {
-  const { json, truncated } = prepareArgsForAudit(entry.args);
-  const [row] = await db
-    .insert(auditLog)
-    .values({
-      endpointId: entry.endpoint.id,
-      endpointNameSnapshot: entry.endpoint.name,
-      backendServerId: entry.backendServerId ?? null,
-      backendServerKeySnapshot: entry.backendServerKey ?? null,
-      sessionId: entry.sessionId ?? null,
-      clientId: entry.clientId ?? null,
-      operationType: entry.operationType,
-      itemName: entry.itemName ?? null,
-      requestArgsJson: json,
-      requestArgsTruncated: truncated,
-      status: entry.status,
-      durationMs: entry.durationMs ?? null,
-      errorMessage: entry.errorMessage ?? null,
-    })
-    .returning({ id: auditLog.id });
-
-  void db
-    .update(clientEndpoints)
-    .set({ lastUsedAt: new Date() })
-    .where(eq(clientEndpoints.id, entry.endpoint.id))
-    .catch(() => {});
-
-  if (entry.clientId) {
-    const clientId = entry.clientId;
-    void db
-      .insert(endpointClients)
-      .values({
-        id: randomUUID(),
-        endpointId: entry.endpoint.id,
-        clientId,
-        firstSeenAt: new Date(),
-        lastSeenAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: [endpointClients.endpointId, endpointClients.clientId],
-        set: { lastSeenAt: new Date() },
-      })
-      .catch(() => {});
-  }
-
-  if (row) emitGatewayEvent({ type: "audit.appended", entryId: row.id });
 }
 
 export async function dispatchListTools(
@@ -248,6 +171,11 @@ export async function dispatchCallTool(
   });
 
   const startedAt = Date.now();
+  // Tracked so an elicitation/sampling request arriving on this connection
+  // mid-call (this shared conn.client can have several endpoints' calls in
+  // flight at once) can be traced back to this specific call - see
+  // in-flight-calls.ts for why the SDK gives us no way to do this itself.
+  registerInFlightCall(conn.id, { callId, endpointId: endpoint.id, sessionId, clientId, startedAt });
   try {
     if (!conn.client) throw new DispatchError("backend not connected");
     const result = await conn.client.callTool({ name: decoded.originalName, arguments: args });
@@ -284,6 +212,8 @@ export async function dispatchCallTool(
     });
     emitGatewayEvent({ type: "call.finished", callId, status: "error", durationMs, error: errorMessage });
     throw err;
+  } finally {
+    unregisterInFlightCall(conn.id, callId);
   }
 }
 
