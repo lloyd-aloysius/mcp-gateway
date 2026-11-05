@@ -147,6 +147,9 @@ npx skills add lloyd-aloysius/mcp-gateway --skill mcp-gateway-operator
 For manual installation, copy the complete skill folder from `skills/` into
 your client's skills directory.
 
+Starting with 0.4.2, the npm package also bundles these folders under
+`node_modules/@lloyd-aloysius/mcp-gateway/skills/` for a project installation.
+
 | Client | Current project | All projects for the current user |
 | --- | --- | --- |
 | Codex | `.agents/skills/` | `~/.agents/skills/` |
