@@ -1,0 +1,4 @@
+interface:
+  display_name: "MCP Gateway Operator"
+  short_description: "Manage gateway backends and endpoint access"
+  default_prompt: "Use $mcp-gateway-operator to inspect my gateway and make the configuration change I requested."

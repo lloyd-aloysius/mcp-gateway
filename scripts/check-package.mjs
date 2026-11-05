@@ -9,6 +9,13 @@ const files = new Set(pack.files.map(({ path }) => path));
 const standalone = ".next/standalone/";
 const required = [
   "bin/cli.mjs",
+  "skills/mcp-gateway/SKILL.md",
+  "skills/mcp-gateway/LICENSE",
+  "skills/mcp-gateway/agents/openai.yaml",
+  "skills/mcp-gateway-operator/SKILL.md",
+  "skills/mcp-gateway-operator/LICENSE",
+  "skills/mcp-gateway-operator/agents/openai.yaml",
+  "skills/mcp-gateway-operator/references/admin-api.md",
   standalone + "server.js",
   standalone + ".next/server/instrumentation.js",
   standalone + "drizzle/meta/_journal.json",

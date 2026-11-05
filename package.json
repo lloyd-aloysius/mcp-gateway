@@ -19,7 +19,8 @@
     "SECURITY.md",
     "CONTRIBUTING.md",
     "CODE_OF_CONDUCT.md",
-    "docs/screenshots"
+    "docs/screenshots",
+    "skills"
   ],
   "publishConfig": {
     "access": "public"

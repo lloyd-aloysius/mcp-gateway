@@ -1,0 +1,4 @@
+interface:
+  display_name: "MCP Gateway"
+  short_description: "Use permitted tools through an MCP Gateway endpoint"
+  default_prompt: "Use $mcp-gateway to discover the tools available on my connected gateway and complete my request."

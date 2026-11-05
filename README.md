@@ -121,6 +121,47 @@ Either way, open [http://localhost:3000](http://localhost:3000). The SQLite data
 
 Add a backend server from the **Servers** page (e.g. `npx -y @modelcontextprotocol/server-everything` as a stdio server), then create a **client endpoint** and copy its config into your MCP client.
 
+## Agent skills
+
+The repository includes two optional [Agent Skills](https://agentskills.io/specification).
+
+| Skill | Use |
+| --- | --- |
+| [mcp-gateway](skills/mcp-gateway/SKILL.md) | Discover permitted tools, use namespaced resources and prompts, and troubleshoot endpoint connections |
+| [mcp-gateway-operator](skills/mcp-gateway-operator/SKILL.md) | Manage backends and access rules, preserve masked secrets, and verify operator changes |
+
+Configure your gateway MCP connection first. These skills provide instructions
+for using that connection. Install the operator skill when the client is meant
+to administer the gateway.
+
+Using the [Skills CLI](https://github.com/vercel-labs/skills), run the following
+from the project where you want to use the gateway. It lets you choose the
+client to install into and requires Node.js 22.20 or later.
+
+```bash
+npx skills add lloyd-aloysius/mcp-gateway --skill mcp-gateway
+# Optional operator guidance:
+npx skills add lloyd-aloysius/mcp-gateway --skill mcp-gateway-operator
+```
+
+For manual installation, copy the complete skill folder from `skills/` into
+your client's skills directory.
+
+| Client | Current project | All projects for the current user |
+| --- | --- | --- |
+| Codex | `.agents/skills/` | `~/.agents/skills/` |
+| Claude Code | `.claude/skills/` | `~/.claude/skills/` |
+
+See the [OpenAI installation guide](https://developers.openai.com/api/reference/cli#use-the-cli-from-a-coding-agent)
+and [Claude Code skills documentation](https://code.claude.com/docs/en/skills)
+for client-specific details. Other clients can use the same skill folders when
+they support the Agent Skills format.
+
+Example requests include “Use the MCP Gateway skill to find a document using my
+connected tools” and “Use the MCP Gateway Operator skill to check why this
+endpoint cannot see a tool.” Keep installation URLs and credentials in your MCP
+client configuration.
+
 ## Docker
 
 A `Dockerfile` is included for running the gateway in a container instead of installing Node locally:
