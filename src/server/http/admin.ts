@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { hasAdminSession } from "./admin-session";
 import { InvalidRequestBody } from "./json-body";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -43,22 +44,15 @@ function failure(status: number, error: string, headers?: Record<string, string>
 }
 
 function readCredential(request: Request): string | null {
-  const authorization = request.headers.get("authorization");
-  if (!authorization) return null;
-  const bearer = /^Bearer (\S+)$/i.exec(authorization)?.[1];
-  if (bearer) return bearer;
-  const basic = /^Basic ([A-Za-z0-9+/]+={0,2})$/i.exec(authorization)?.[1];
-  if (!basic) return null;
-  const decoded = Buffer.from(basic, "base64").toString("utf8");
-  return decoded.startsWith("admin:") ? decoded.slice("admin:".length) : null;
+  return /^Bearer (\S+)$/i.exec(request.headers.get("authorization") ?? "")?.[1] ?? null;
 }
 
-function sameSecret(left: string, right: string): boolean {
+export function sameAdminSecret(left: string, right: string): boolean {
   const digest = (value: string) => createHash("sha256").update(value).digest();
   return timingSafeEqual(digest(left), digest(right));
 }
 
-export function authorizeAdmin(request: Request): Response | null {
+export function adminRequestOrigins(request: Request): string[] | Response {
   const host = request.headers.get("host")?.toLowerCase() ?? null;
   const local = originForHost(host);
   const configured = configuredOrigins("MCP_GATEWAY_ADMIN_ORIGINS");
@@ -70,16 +64,39 @@ export function authorizeAdmin(request: Request): Response | null {
       (!READ_METHODS.has(request.method) && request.headers.get("sec-fetch-site") === "cross-site")) {
     return failure(403, "Admin origin is not allowed");
   }
+  return origins;
+}
+
+export function adminSessionOrigin(request: Request): string | Response {
+  const origins = adminRequestOrigins(request);
+  if (origins instanceof Response) return origins;
+  const origin = request.headers.get("origin");
+  if (!origin || !origins.includes(origin)) return failure(403, "A trusted Origin is required");
+  if (!origin.startsWith("https:") && !originForHost(request.headers.get("host"))) {
+    return failure(403, "Use HTTPS to sign in to the dashboard");
+  }
+  return origin;
+}
+
+export function authorizeAdmin(request: Request): Response | null {
+  const origins = adminRequestOrigins(request);
+  if (origins instanceof Response) return origins;
 
   const token = process.env.MCP_GATEWAY_ADMIN_TOKEN;
-  if (!token && local && !hasConfiguredOrigins && LOOPBACK_HOSTS.has(process.env.HOSTNAME ?? "")) {
+  if (!token && !process.env.MCP_GATEWAY_ADMIN_ORIGINS?.trim() &&
+      originForHost(request.headers.get("host")) && LOOPBACK_HOSTS.has(process.env.HOSTNAME ?? "")) {
     return null;
   }
   if (!token || token.length < 24) return failure(503, "Set a dedicated admin token of at least 24 characters");
   const credential = readCredential(request);
-  return credential && sameSecret(token, credential) ? null : failure(401, "Admin authentication is required", {
-    "www-authenticate": 'Basic realm="MCP Gateway Admin", charset="UTF-8"',
-  });
+  if (credential && sameAdminSecret(token, credential)) return null;
+  if (hasAdminSession(request, token, origins)) {
+    if (!READ_METHODS.has(request.method) && !request.headers.has("origin")) {
+      return failure(403, "A trusted Origin is required");
+    }
+    return null;
+  }
+  return failure(401, "Admin authentication is required");
 }
 
 export function withAdmin<Args extends unknown[]>(handler: (request: Request, ...args: Args) => Promise<Response>) {

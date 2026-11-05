@@ -148,13 +148,16 @@ test("built gateway security and startup", { timeout: 30_000 }, async (t) => {
 
   await t.test("admin credentials, trusted origins and request limits are enforced", async () => {
     assert.equal((await request("/")).status, 200);
-    assert.equal((await request("/", "GET", undefined, { authorization: "" })).status, 401);
+    const anonymous = await fetch(base, { redirect: "manual" });
+    assert.equal(anonymous.status, 307);
+    assert.equal(new URL(anonymous.headers.get("location"), base).href, base + "/login");
+    assert.equal(anonymous.headers.has("www-authenticate"), false);
     assert.equal((await request("/api/health", "GET", undefined, { authorization: "" })).status, 200);
     for (const path of ["/api/servers", "/api/endpoints", "/api/audit/export", "/api/events/stream"]) {
       assert.equal((await request(path, "GET", undefined, { authorization: "Bearer " + endpoint.token })).status, 401);
     }
     const basic = "Basic " + Buffer.from("admin:" + ADMIN_TOKEN).toString("base64");
-    assert.equal((await request("/api/servers", "GET", undefined, { authorization: basic })).status, 200);
+    assert.equal((await request("/api/servers", "GET", undefined, { authorization: basic })).status, 401);
     assert.equal((await request("/api/endpoints", "POST", {}, { origin: "https://foreign.invalid" })).status, 403);
     assert.equal((await request(mcpPath, "GET", undefined, {
       authorization: "Bearer " + endpoint.token, origin: "https://foreign.invalid",
@@ -163,6 +166,31 @@ test("built gateway security and startup", { timeout: 30_000 }, async (t) => {
     assert.equal((await request(mcpPath, "POST", Array.from({ length: 17 }, () => ({})), {
       authorization: "Bearer " + endpoint.token, accept: "application/json, text/event-stream",
     })).status, 413);
+  });
+
+  await t.test("browser sign-in issues a revocable session and protects mutations from cross-origin requests", async () => {
+    assert.equal((await request("/login", "GET", undefined, { authorization: "" })).status, 200);
+    const login = (password, origin = base) => request("/api/admin/session", "POST", { password }, {
+      authorization: "", origin,
+    });
+    assert.equal((await login(ADMIN_TOKEN, "https://foreign.invalid")).status, 403);
+    assert.equal((await login(endpoint.token)).status, 401);
+    const signedIn = await login(ADMIN_TOKEN);
+    assert.equal(signedIn.status, 204);
+    const cookie = signedIn.headers.get("set-cookie");
+    assert.match(cookie, /HttpOnly; SameSite=Strict/);
+    assert.ok(!cookie.includes(ADMIN_TOKEN));
+    const session = { authorization: "", cookie: cookie.split(";")[0] };
+    assert.equal((await request("/", "GET", undefined, session)).status, 200);
+    assert.equal((await request("/api/servers", "GET", undefined, session)).status, 200);
+    assert.equal((await request("/api/endpoints", "POST", {}, session)).status, 403);
+    assert.equal((await request("/api/admin/session", "DELETE", undefined, {
+      ...session, origin: "https://foreign.invalid",
+    })).status, 403);
+    const signedOut = await request("/api/admin/session", "DELETE", undefined, { ...session, origin: base });
+    assert.equal(signedOut.status, 204);
+    assert.match(signedOut.headers.get("set-cookie"), /Max-Age=0/);
+    assert.equal((await request("/api/servers", "GET", undefined, session)).status, 401);
   });
 
   const first = await connect(endpoint.token);

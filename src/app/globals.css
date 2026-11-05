@@ -167,7 +167,7 @@
   }
 }
 .edge-travel-chip {
-  animation: edge-travel 1.5s linear;
+  animation: edge-travel linear infinite;
 }
 
 @layer base {

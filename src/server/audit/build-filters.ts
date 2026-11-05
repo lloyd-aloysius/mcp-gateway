@@ -17,6 +17,13 @@ export function buildAuditFilters(searchParams: URLSearchParams): SQL[] {
   const clientId = searchParams.get("clientId");
   if (clientId) filters.push(eq(auditLog.clientId, clientId));
 
+  const operationType = searchParams.get("operationType");
+  if (operationType) {
+    const operation = auditLog.operationType.enumValues.find((value) => value === operationType);
+    if (!operation) throw new InvalidRequestBody(400, "Invalid audit operation type");
+    filters.push(eq(auditLog.operationType, operation));
+  }
+
   const status = searchParams.get("status");
   if (status && ["success", "error", "denied"].includes(status)) {
     filters.push(eq(auditLog.status, status as "success" | "error" | "denied"));

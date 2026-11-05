@@ -7,6 +7,7 @@ import { usePollingFetch } from "@/lib/hooks/use-polling-fetch";
 import { useEventStream, type GatewayEvent } from "@/lib/hooks/use-event-stream";
 import { GatewayFlow, type PulseState } from "@/components/flow/gateway-flow";
 import { ActivityFeed, type ActivityEntry } from "@/components/flow/activity-feed";
+import { PULSE_TRAVEL_MS } from "@/components/flow/pulse-edge";
 
 type BackendServerRow = {
   id: string;
@@ -46,7 +47,6 @@ type AuditRow = {
   timestamp: string;
   endpointNameSnapshot: string | null;
   backendServerKeySnapshot: string | null;
-  operationType: string;
   itemName: string | null;
   status: "success" | "error" | "denied";
   durationMs: number | null;
@@ -54,7 +54,8 @@ type AuditRow = {
 };
 
 const PULSE_CLEAR_MS = 1500;
-const MAX_ACTIVITY_ENTRIES = 30;
+const MIN_PULSE_MS = PULSE_TRAVEL_MS + 100; // Allow the browser time to paint the first frame.
+const MAX_ACTIVITY_ENTRIES = 50;
 
 function shortToolName(itemName: string | null) {
   if (!itemName) return null;
@@ -76,18 +77,28 @@ export default function Home() {
     Map<
       string,
       {
-        serverId: string | null;
-        endpointId: string;
         clientId: string | null;
-        itemName: string | null;
-        endpointName: string;
+        edgeKeys: string[];
+        label: string;
+        startedAt: number;
       }
     >
   >(new Map());
-  // Tracks which callIds are still in flight per edge, so concurrent calls sharing an
-  // edge don't clobber each other's "active" glow when one of them finishes first.
+  // A call owns its edges until it finishes and has had time for a full particle pass.
   const activeCallsByEdge = useRef<Map<string, Set<string>>>(new Map());
+  const finishTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const clearTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const finishing = finishTimers.current;
+    const clearing = clearTimers.current;
+    return () => {
+      finishing.forEach((timer) => clearTimeout(timer));
+      clearing.forEach((timer) => clearTimeout(timer));
+      finishing.clear();
+      clearing.clear();
+    };
+  }, []);
 
   const setEdgePulse = useCallback(
     (key: string, status: PulseState[string]["status"], label?: string) => {
@@ -98,12 +109,11 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/audit?page=1", { cache: "no-store" })
+    fetch("/api/audit?operationType=tools%2Fcall", { cache: "no-store" })
       .then((res) => (res.ok ? (res.json() as Promise<{ rows: AuditRow[] }>) : null))
       .then((data) => {
         if (cancelled || !data) return;
         const seeded: ActivityEntry[] = data.rows
-          .filter((row) => row.operationType === "tools/call")
           .map((row) => ({
             id: `audit-${row.id}`,
             timestamp: new Date(row.timestamp).getTime(),
@@ -132,20 +142,15 @@ export default function Home() {
       }
 
       if (event.type === "call.started") {
-        pendingCalls.current.set(event.callId, {
-          serverId: event.backendServerId,
-          endpointId: event.endpointId,
-          clientId: event.clientId,
-          itemName: event.itemName,
-          endpointName: event.endpointName,
-        });
-
         const label = shortToolName(event.itemName) ?? event.operationType;
         const edgeKeys = [
           event.backendServerId ? `server-${event.backendServerId}` : null,
           `endpoint-${event.endpointId}`,
           event.clientId ? `client-${event.endpointId}-${event.clientId}` : null,
         ].filter((k): k is string => !!k);
+        pendingCalls.current.set(event.callId, {
+          clientId: event.clientId, edgeKeys, label, startedAt: performance.now(),
+        });
 
         for (const key of edgeKeys) {
           let set = activeCallsByEdge.current.get(key);
@@ -182,27 +187,26 @@ export default function Home() {
         pendingCalls.current.delete(event.callId);
         if (!call) return;
 
-        const label = shortToolName(call.itemName) ?? undefined;
-        const edgeKeys = [
-          call.serverId ? `server-${call.serverId}` : null,
-          `endpoint-${call.endpointId}`,
-          call.clientId ? `client-${call.endpointId}-${call.clientId}` : null,
-        ].filter((k): k is string => !!k);
-
-        for (const key of edgeKeys) {
-          activeCallsByEdge.current.get(key)?.delete(event.callId);
-          setEdgePulse(key, event.status, label);
-
-          const existing = clearTimers.current.get(key);
-          if (existing) clearTimeout(existing);
-          clearTimers.current.set(
-            key,
-            setTimeout(() => {
+        const finishPulse = () => {
+          finishTimers.current.delete(event.callId);
+          for (const key of call.edgeKeys) {
+            const calls = activeCallsByEdge.current.get(key);
+            calls?.delete(event.callId);
+            if (calls?.size) continue;
+            activeCallsByEdge.current.delete(key);
+            setEdgePulse(key, event.status, call.label);
+            clearTimers.current.set(key, setTimeout(() => {
               clearTimers.current.delete(key);
-              const stillActive = (activeCallsByEdge.current.get(key)?.size ?? 0) > 0;
-              setEdgePulse(key, stillActive ? "active" : "idle");
-            }, PULSE_CLEAR_MS)
-          );
+              setEdgePulse(key, "idle");
+            }, PULSE_CLEAR_MS));
+          }
+        };
+
+        const remaining = MIN_PULSE_MS - (performance.now() - call.startedAt);
+        if (remaining > 0) {
+          finishTimers.current.set(event.callId, setTimeout(finishPulse, remaining));
+        } else {
+          finishPulse();
         }
 
         setActivity((prev) =>
@@ -235,7 +239,7 @@ export default function Home() {
         </p>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-4 lg:grid-cols-[1fr_320px]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(420px,1fr)_24rem] gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[minmax(420px,1fr)]">
         <Card className="glass-panel min-h-[420px] overflow-hidden p-0 ring-0 backdrop-blur-2xl backdrop-saturate-150">
           {!servers || !endpoints || !clients ? (
             <div className="flex h-full items-center justify-center p-8">
@@ -251,9 +255,9 @@ export default function Home() {
           )}
         </Card>
 
-        <Card className="glass-panel flex min-h-0 flex-col overflow-hidden p-0 ring-0 backdrop-blur-2xl backdrop-saturate-150">
-          <CardHeader className="border-b py-3">
-            <CardTitle className="text-sm">Live activity</CardTitle>
+        <Card className="glass-panel flex min-h-0 flex-col gap-0 overflow-hidden p-0 ring-0 backdrop-blur-2xl backdrop-saturate-150">
+          <CardHeader className="shrink-0 border-b py-3">
+            <CardTitle id="live-activity-heading" className="text-sm">Live activity</CardTitle>
           </CardHeader>
           <CardContent className="min-h-0 flex-1 overflow-hidden p-0">
             <ActivityFeed entries={activity} />

@@ -108,7 +108,12 @@ function DetailRow({ icon: Icon, mono, children }: { icon: typeof Clock; mono?: 
   return (
     <div className="mt-1.5 flex items-start gap-1.5 text-[10px] leading-snug text-muted-foreground/80">
       <Icon className="mt-0.5 size-2.5 shrink-0" />
-      <span className={cn("min-w-0 break-words", mono && "font-mono")}>{children}</span>
+      <span
+        className={cn("min-w-0 break-words", mono && "line-clamp-2 font-mono [overflow-wrap:anywhere]")}
+        title={mono && typeof children === "string" ? children : undefined}
+      >
+        {children}
+      </span>
     </div>
   );
 }
@@ -153,7 +158,7 @@ export function ServerNode({ data }: NodeProps<Node<ServerNodeData>>) {
         <StatusBadge status={data.status} />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="break-words text-sm font-medium">{data.name}</p>
+        <p title={data.name} className="line-clamp-2 text-sm font-medium [overflow-wrap:anywhere]">{data.name}</p>
         <p className="break-words text-xs text-muted-foreground">
           {data.enabled ? "Enabled" : "Disabled"} · {STATUS_LABEL[data.status] ?? data.status} ·{" "}
           {TYPE_LABEL[data.connectionType]}
@@ -169,7 +174,7 @@ export function ServerNode({ data }: NodeProps<Node<ServerNodeData>>) {
         {data.status === "error" && data.lastError && (
           <div className="mt-1.5 flex items-start gap-1.5 text-[10px] leading-snug text-red-500">
             <AlertTriangle className="mt-0.5 size-2.5 shrink-0" />
-            <span className="min-w-0 break-words">{data.lastError}</span>
+            <span title={data.lastError} className="line-clamp-2 min-w-0 [overflow-wrap:anywhere]">{data.lastError}</span>
           </div>
         )}
 

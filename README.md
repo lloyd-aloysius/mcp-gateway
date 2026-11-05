@@ -4,7 +4,7 @@ A self-hosted dashboard for aggregating multiple [Model Context Protocol](https:
 
 Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL instead of configuring each backend server individually. Namespaced tools (`server__tool`) from every connected backend show up as one unified toolset, with fine-grained control over which client can use which server.
 
-![Overview page — live topology of backend servers, client endpoints, and their connected clients, with a real-time activity feed](docs/screenshots/overview.png)
+![Gateway overview with two server columns on the left, three endpoints and their clients on the right, and tool calls in flight alongside Live activity](docs/screenshots/overview.png)
 
 ## Features
 
@@ -27,8 +27,8 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 
 ### Live visualization & audit
 
-- **Real-time network diagram** — the homepage shows every backend server, the gateway, every client endpoint, and every connected client as a live topology graph, with animated pulses traveling along the edges as tool calls actually flow through — denied calls visibly stop at the gateway instead of continuing to the backend, and concurrent calls on the same edge are tracked independently.
-- **Live activity feed** — a real-time, animated log of the most recent calls alongside the diagram, driven by the same Server-Sent Events stream.
+- **Real-time network diagram**. The overview groups growing server inventories into two staggered columns and refits when nodes are added or removed. Client requests animate from client to endpoint to gateway to server. Denied calls stop at the gateway. Even quick calls get a full particle pass, and overlapping calls keep shared links active.
+- **Live activity**. The card shows only the newest complete rows that fit. New calls arrive at the top and push the oldest visible row out. The feed shows the actual completion time while the graph animation finishes. Use **Audit Log** to browse older calls.
 - **Full audit log** — every tool call, resource read, and prompt fetch is recorded, including denials, with exact and relative timestamps, duration, and outcome. Filterable by endpoint, server, client, and status, with free-text search and CSV export.
 
 ### Security & deployment
@@ -36,7 +36,8 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 - **Interactive backends** — elicitation and sampling are off on shared connections. An operator can opt in specific endpoint and backend pairs to run interactive calls on isolated connections.
 
 - **No stored plaintext where it's avoidable** — endpoint tokens are hashed (SHA-256) at rest, never stored or retrievable in plaintext after creation.
-- **CSRF-protected admin API** — mutating admin requests are checked against the app's own origin, closing off the class of attack where a malicious webpage tries to reach the locally-bound dashboard through a victim's browser.
+- **Dashboard sign-in**. Enter the existing admin token on a page that follows your light or dark theme. The navigation footer shows the running gateway version and lets you sign out on desktop and mobile.
+- **CSRF-protected admin API**. Browser sign-in and cookie-authenticated mutations require a trusted origin. Automation can send the admin token as a bearer credential.
 - **Tailscale-aware** — detects an active tailnet connection and surfaces the real MagicDNS hostname/IP on the Settings page, with a dedicated config tab for Tailscale-based remote client access.
 - **Installable Node CLI** — install via `npx`, `npm install -g`, or clone-and-run; ships as a self-contained CLI with no separate build step for consumers, automatic SQLite creation and migrations on first boot, and `.env`-based configuration.
 - **CI-verified releases** — every push runs typecheck/lint/build; tagged releases automatically publish to npm (via OIDC Trusted Publishing — no stored npm token) and create a GitHub Release with auto-generated notes.
@@ -44,9 +45,16 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 ## Screenshots
 
 <details>
+<summary><strong>Dashboard sign-in</strong></summary>
+
+![MCP Gateway dark theme sign-in page with the admin token field and theme toggle](docs/screenshots/sign-in.png)
+
+</details>
+
+<details>
 <summary><strong>Backend servers</strong> — connection status, one-click reconnect, per-tool kill switch</summary>
 
-![Servers list — three connected backend servers with their commands and live status](docs/screenshots/servers.png)
+![Servers list with connected backend servers, transports, and live status](docs/screenshots/servers.png)
 
 Every backend server shows its live connection status and a **Reconnect all** action. Opening a server exposes its full tool list with an individual enable/disable switch per tool — a disabled tool disappears from every endpoint's tool list and is blocked from being called, regardless of that endpoint's access policy.
 
@@ -66,18 +74,18 @@ Already have a working MCP config for another client? Paste it directly and the 
 <details>
 <summary><strong>Client endpoints</strong> — per-server access rules, connected clients, ready-to-copy config</summary>
 
-![Endpoints list — two endpoints with different default access policies](docs/screenshots/endpoints.png)
+![Endpoints list with several endpoints and their client access policies](docs/screenshots/endpoints.png)
 
 Each endpoint gets its own default policy (allow-all-then-restrict, or deny-all-then-grant) plus per-server overrides, a list of the distinct clients that have connected to it, and a client-config panel that's always ready to paste — the server entry name is always the fixed `mcp-gateway`, so renaming an endpoint never breaks an already-configured client.
 
-![Endpoint detail page — access rule table, connected clients, and copy-paste client configuration](docs/screenshots/endpoint-detail.png)
+![Engineering endpoint settings and its per-server access rules](docs/screenshots/endpoint-detail.png)
 
 </details>
 
 <details>
 <summary><strong>Audit log</strong> — every call, every denial, filterable and exportable</summary>
 
-![Audit log — exact + relative timestamps, filters for endpoint/server/client/status, a denied call highlighted](docs/screenshots/audit-log.png)
+![Audit log with filters, precise and relative timestamps, and tool call durations](docs/screenshots/audit-log.png)
 
 Every tool call is logged with exact and relative timestamps, duration, and outcome — including calls blocked by access policy, so a "why didn't this work" question always has an answer in the log instead of just in a client-side error.
 
@@ -85,7 +93,7 @@ Every tool call is logged with exact and relative timestamps, duration, and outc
 
 ## Quickstart
 
-Run it directly, no clone needed — this builds and starts it from wherever you run the command:
+With Node.js 22 or later, run the prebuilt npm package:
 
 ```bash
 npx @lloyd-aloysius/mcp-gateway
@@ -160,13 +168,18 @@ Copy `.env.example` to `.env` to override defaults:
 | `DATABASE_PATH` | `./data/gateway.db` | Where the SQLite file lives |
 | `PORT` | `3000` | Port `npm start` binds to |
 | `HOST` | `127.0.0.1` | Host `npm start` binds to |
+| `MCP_GATEWAY_ADMIN_TOKEN` | Unset | Dashboard credential and admin API bearer token |
+| `MCP_GATEWAY_ADMIN_ORIGINS` | Loopback | Comma-separated trusted dashboard origins, including the scheme and port |
 
 ## Security notes
 
 The CLI defaults to loopback. Remote and container administration requires a dedicated
 `MCP_GATEWAY_ADMIN_TOKEN` of at least 24 characters and a trusted dashboard origin in
-`MCP_GATEWAY_ADMIN_ORIGINS`. In a browser, use the username `admin` and the token as the
-password. Admin scripts can use the token as a bearer credential. Keep the dashboard
+`MCP_GATEWAY_ADMIN_ORIGINS`. Enter the token on the dashboard sign-in page.
+Browser sessions expire after 12 hours or when the gateway restarts. Admin scripts
+use `Authorization: Bearer <admin-token>`. If you previously scripted admin requests
+with HTTP Basic authentication, switch those requests to Bearer when upgrading.
+MCP client endpoints continue to use their existing endpoint tokens. Keep the dashboard
 behind TLS and restrict it to administrator devices. Give MCP clients a separate
 hostname and forward only their MCP routes.
 

@@ -5,6 +5,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { ThemeProvider } from "@/components/theme-provider";
+import { gatewayVersion } from "@/lib/gateway-version";
+
+export const dynamic = "force-dynamic";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,7 +38,9 @@ export default function RootLayout({
       <body className="h-full flex flex-col">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <TooltipProvider>
-            <AppShell>{children}</AppShell>
+            <AppShell version={gatewayVersion} canSignOut={Boolean(process.env.MCP_GATEWAY_ADMIN_TOKEN)}>
+              {children}
+            </AppShell>
           </TooltipProvider>
           <Toaster />
         </ThemeProvider>

@@ -4,6 +4,8 @@ import { useReactFlow } from "@xyflow/react";
 import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+export const FLOW_PADDING = 0.18;
+
 export function FlowControls() {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
 
@@ -28,7 +30,7 @@ export function FlowControls() {
       <Button
         variant="ghost"
         size="icon-sm"
-        onClick={() => fitView({ duration: 200, padding: 0.3 })}
+        onClick={() => fitView({ duration: 200, padding: FLOW_PADDING })}
         aria-label="Fit view"
       >
         <Maximize className="size-4" />

@@ -1,4 +1,4 @@
-import { withAdmin } from "@/server/http/admin";
+import { authorizeAdmin, withAdmin } from "@/server/http/admin";
 import { gatewayEventSubscribers, subscribeToGatewayEvents } from "@/server/events/bus";
 
 async function get(req: Request) {
@@ -13,7 +13,7 @@ async function get(req: Request) {
       let closed = false;
       function enqueue(text: string) {
         if (closed) return;
-        if ((controller.desiredSize ?? 0) <= 0) {
+        if ((controller.desiredSize ?? 0) <= 0 || authorizeAdmin(req)) {
           cleanup();
           controller.close();
           return;

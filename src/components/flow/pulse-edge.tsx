@@ -3,9 +3,13 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps, type Edge } from "@xyflow/react";
 import { cn } from "@/lib/utils";
 
+export const PULSE_TRAVEL_MS = 1500;
+
 export type PulseEdgeData = {
   pulseStatus: "idle" | "active" | "success" | "error" | "denied";
   label?: string;
+  leadX?: number;
+  reverseTravel?: boolean;
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -26,14 +30,17 @@ export function PulseEdge({
   targetPosition,
   data,
 }: EdgeProps<Edge<PulseEdgeData>>) {
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
+  const leadX = data?.leadX ?? sourceX;
+  const [curve, labelX, labelY] = getBezierPath({
+    sourceX: leadX,
     sourceY,
     sourcePosition,
     targetX,
     targetY,
     targetPosition,
   });
+  // The outer server column crosses the gaps between inner cards before curving to the hub.
+  const edgePath = leadX === sourceX ? curve : curve.replace(/^M/, `M${sourceX},${sourceY} L`);
 
   const status = data?.pulseStatus ?? "idle";
   const active = status !== "idle";
@@ -64,6 +71,8 @@ export function PulseEdge({
               background: STATUS_COLOR.active,
               offsetPath: `path('${edgePath}')`,
               offsetRotate: "0deg",
+              animationDuration: `${PULSE_TRAVEL_MS}ms`,
+              animationDirection: data?.reverseTravel ? "reverse" : "normal",
               boxShadow: `0 0 8px 1px ${STATUS_COLOR.active}`,
             }}
           />

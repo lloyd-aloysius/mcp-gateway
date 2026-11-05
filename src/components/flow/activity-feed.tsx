@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import { Activity, CheckCircle2, XCircle, ShieldAlert } from "lucide-react";
@@ -23,6 +24,8 @@ const STATUS_ICON = {
   denied: ShieldAlert,
 };
 
+const ROW_HEIGHT = 60;
+
 const STATUS_STYLE: Record<ActivityEntry["status"], { dot: string; detail: string }> = {
   pending: { dot: "bg-muted-foreground text-background", detail: "text-muted-foreground" },
   success: { dot: "bg-emerald-500 text-background", detail: "text-emerald-500/90" },
@@ -43,10 +46,22 @@ function detailLine(entry: ActivityEntry): string {
   }
 }
 
-export function ActivityFeed({ entries, maxVisible = 8 }: { entries: ActivityEntry[]; maxVisible?: number }) {
-  const visible = entries.slice(0, maxVisible);
+export function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const [capacity, setCapacity] = useState(0);
+  const hasEntries = entries.length > 0;
 
-  if (visible.length === 0) {
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setCapacity(Math.floor(entry.contentRect.height / ROW_HEIGHT));
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [hasEntries]);
+
+  if (!hasEntries) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
         No activity yet. Tool calls will appear here in real time.
@@ -54,22 +69,25 @@ export function ActivityFeed({ entries, maxVisible = 8 }: { entries: ActivityEnt
     );
   }
 
+  const visible = entries.slice(0, capacity);
+
   return (
-    <ul className="flex h-full flex-col overflow-hidden px-4 py-3">
+    <ul ref={listRef} aria-labelledby="live-activity-heading" className="relative h-full overflow-clip px-4 py-3">
       <AnimatePresence mode="popLayout" initial={false}>
         {visible.map((entry, index) => {
           const Icon = STATUS_ICON[entry.status];
           const style = STATUS_STYLE[entry.status];
           const isLast = index === visible.length - 1;
+          const detail = detailLine(entry);
           return (
             <motion.li
               key={entry.id}
-              layout
+              layout="position"
               initial={{ opacity: 0, x: -6 }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 6 }}
               transition={{ duration: 0.2 }}
-              className="relative flex gap-3 pb-3 pl-1 last:pb-0"
+              style={{ height: ROW_HEIGHT }}
+              className="relative flex gap-3 pl-1"
             >
               {!isLast && (
                 <span className="absolute left-[9.5px] top-5 bottom-[-4px] w-px bg-border" />
@@ -84,7 +102,10 @@ export function ActivityFeed({ entries, maxVisible = 8 }: { entries: ActivityEnt
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="min-w-0 break-words font-mono text-[11px] font-medium leading-snug">
+                  <p
+                    title={`${entry.endpointName} → ${entry.toolName}`}
+                    className="line-clamp-2 min-w-0 font-mono text-[11px] font-medium leading-snug [overflow-wrap:anywhere]"
+                  >
                     {entry.endpointName} <span className="text-muted-foreground">→</span> {entry.toolName}
                   </p>
                   <span
@@ -94,8 +115,8 @@ export function ActivityFeed({ entries, maxVisible = 8 }: { entries: ActivityEnt
                     {formatDistanceToNowStrict(entry.timestamp, { addSuffix: true })}
                   </span>
                 </div>
-                <p className={cn("mt-0.5 break-words text-[11px] leading-snug", style.detail)}>
-                  {detailLine(entry)}
+                <p title={detail} className={cn("mt-0.5 truncate text-[11px] leading-snug", style.detail)}>
+                  {detail}
                 </p>
               </div>
             </motion.li>

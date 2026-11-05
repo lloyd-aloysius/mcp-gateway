@@ -15,13 +15,12 @@ import "@xyflow/react/dist/style.css";
 import { cn } from "@/lib/utils";
 import { ServerNode, GatewayNode, EndpointNode, ClientNode } from "./nodes";
 import { PulseEdge } from "./pulse-edge";
-import { FlowControls } from "./flow-controls";
+import { FLOW_PADDING, FlowControls } from "./flow-controls";
 
 const nodeTypes = { server: ServerNode, gateway: GatewayNode, endpoint: EndpointNode, client: ClientNode };
 const edgeTypes = { pulse: PulseEdge };
 
 const ROW_HEIGHT = 260;
-const TOP_MARGIN = 24;
 
 // Explicit width/height AND `measured` on each node (matching each node component's actual
 // Tailwind width, plus a generous height buffer over the tallest realistic content) so React Flow
@@ -39,6 +38,8 @@ const NODE_DIMENSIONS = {
 } as const;
 
 const SERVER_X = 0;
+const OUTER_SERVER_X = SERVER_X - NODE_DIMENSIONS.server.width - 64;
+const OUTER_EDGE_LEAD = SERVER_X + NODE_DIMENSIONS.server.width + 16;
 const GATEWAY_X = 560;
 // Same horizontal gap on both sides of the hub: server-column-right-edge to gateway-left-edge
 // equals gateway-right-edge to endpoint-left-edge.
@@ -46,7 +47,8 @@ const HUB_GAP = GATEWAY_X - SERVER_X - NODE_DIMENSIONS.server.width;
 const ENDPOINT_X = GATEWAY_X + NODE_DIMENSIONS.gateway.width + HUB_GAP;
 // Separate, smaller gap for the client fan-out — this one was already correct as-is.
 export const CLIENT_X = ENDPOINT_X + NODE_DIMENSIONS.endpoint.width + 80;
-const CLIENT_ROW_HEIGHT = 80;
+const CLIENT_ROW_HEIGHT = 110;
+const ENDPOINT_GROUP_GAP = ROW_HEIGHT - NODE_DIMENSIONS.endpoint.height;
 
 // Edge source/target coordinates are computed from each node's *handle* bounds, which React Flow
 // normally measures separately (via the same ResizeObserver pass that measures node size). Giving
@@ -138,7 +140,7 @@ export type PulseState = Record<string, { status: "idle" | "active" | "success" 
 // flag (`internals.handleBounds`, populated only by that same observer) and can stay false
 // indefinitely in browsers where it never fires, permanently blocking any re-fit.
 //
-// Re-fit only when the actual *set* of node ids changes (a node was added/removed), not on every
+// Re-fit only when the node set or its coordinates change, not on every
 // background poll — servers/endpoints/clients are polled every 8-10s and each poll produces new
 // object references even when nothing meaningfully changed. Naively re-fitting on every poll would
 // reset any zoom/pan the user just did every ~10 seconds; tracking the last-fit signature keeps the
@@ -157,7 +159,7 @@ function AutoFitView({ nodeIdsSignature, onFirstFit }: { nodeIdsSignature: strin
     if (lastFitSignature.current === nodeIdsSignature) return;
     const isFirstFit = lastFitSignature.current === null;
     lastFitSignature.current = nodeIdsSignature;
-    void fitView({ padding: 0.3, duration: isFirstFit ? 0 : 200 }).then(() => {
+    void fitView({ padding: FLOW_PADDING, duration: isFirstFit ? 0 : 200 }).then(() => {
       if (isFirstFit) onFirstFit();
     });
   }, [nodeIdsSignature, fitView, onFirstFit]);
@@ -192,8 +194,32 @@ export function GatewayFlow({
   pulses: PulseState;
 }) {
   const { nodes, edges } = useMemo(() => {
-    const rowCount = Math.max(servers.length, endpoints.length, 1);
-    const gatewayY = TOP_MARGIN + ((rowCount - 1) * ROW_HEIGHT) / 2;
+    const orderedServers = [...servers].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    const staggered = orderedServers.length >= 5;
+    const serverStep = staggered ? ROW_HEIGHT / 2 : ROW_HEIGHT;
+    const serverTop = -((orderedServers.length - 1) * serverStep + NODE_DIMENSIONS.server.height) / 2;
+
+    const clientsByEndpoint = new Map<string, EndpointClientRow[]>();
+    for (const client of clients) {
+      const group = clientsByEndpoint.get(client.endpointId) ?? [];
+      group.push(client);
+      clientsByEndpoint.set(client.endpointId, group);
+    }
+    const endpointGroups = endpoints.map((endpoint) => {
+      const clients = clientsByEndpoint.get(endpoint.id) ?? [];
+      const clientHeight = clients.length > 0
+        ? (clients.length - 1) * CLIENT_ROW_HEIGHT + NODE_DIMENSIONS.client.height
+        : 0;
+      return { endpoint, clients, clientHeight, height: Math.max(NODE_DIMENSIONS.endpoint.height, clientHeight) };
+    });
+    const endpointHeight = endpointGroups.reduce((sum, group) => sum + group.height, 0)
+      + Math.max(0, endpointGroups.length - 1) * ENDPOINT_GROUP_GAP;
+    let groupTop = -endpointHeight / 2;
+    const placedEndpoints = [];
+    for (const group of endpointGroups) {
+      placedEndpoints.push({ ...group, center: groupTop + group.height / 2 });
+      groupTop += group.height + ENDPOINT_GROUP_GAP;
+    }
 
     const anyActive = Object.values(pulses).some((p) => p.status === "active");
     const anyFlash = Object.values(pulses).find((p) => p.status !== "idle" && p.status !== "active");
@@ -203,17 +229,17 @@ export function GatewayFlow({
       {
         id: "gateway",
         type: "gateway",
-        position: { x: GATEWAY_X, y: gatewayY },
+        position: { x: GATEWAY_X, y: -NODE_DIMENSIONS.gateway.height / 2 },
         data: { serverCount: servers.length, endpointCount: endpoints.length, pulseStatus: gatewayPulse },
         draggable: false,
         ...NODE_DIMENSIONS.gateway,
         measured: NODE_DIMENSIONS.gateway,
         handles: NODE_HANDLES.gateway,
       },
-      ...servers.map((s, i) => ({
+      ...orderedServers.map((s, i) => ({
         id: `server-${s.id}`,
         type: "server",
-        position: { x: SERVER_X, y: TOP_MARGIN + i * ROW_HEIGHT },
+        position: { x: staggered && i % 2 === 1 ? OUTER_SERVER_X : SERVER_X, y: serverTop + i * serverStep },
         data: {
           name: s.name,
           description: s.description,
@@ -233,10 +259,10 @@ export function GatewayFlow({
         measured: NODE_DIMENSIONS.server,
         handles: NODE_HANDLES.server,
       })),
-      ...endpoints.map((e, i) => ({
+      ...placedEndpoints.map(({ endpoint: e, center }) => ({
         id: `endpoint-${e.id}`,
         type: "endpoint",
-        position: { x: ENDPOINT_X, y: TOP_MARGIN + i * ROW_HEIGHT },
+        position: { x: ENDPOINT_X, y: center - NODE_DIMENSIONS.endpoint.height / 2 },
         data: {
           name: e.name,
           slug: e.slug,
@@ -256,7 +282,7 @@ export function GatewayFlow({
     ];
 
     const edges: Edge[] = [
-      ...servers.map((s) => {
+      ...orderedServers.map((s, i) => {
         const pulse = pulses[`server-${s.id}`];
         return {
           id: `edge-server-${s.id}`,
@@ -265,7 +291,12 @@ export function GatewayFlow({
           target: "gateway",
           targetHandle: "left",
           type: "pulse",
-          data: { pulseStatus: pulse?.status ?? "idle", label: pulse?.label },
+          data: {
+            pulseStatus: pulse?.status ?? "idle",
+            label: pulse?.label,
+            leadX: staggered && i % 2 === 1 ? OUTER_EDGE_LEAD : undefined,
+            reverseTravel: true,
+          },
         };
       }),
       ...endpoints.map((e) => {
@@ -277,17 +308,14 @@ export function GatewayFlow({
           target: `endpoint-${e.id}`,
           targetHandle: "left",
           type: "pulse",
-          data: { pulseStatus: pulse?.status ?? "idle", label: pulse?.label },
+          // The curve is drawn outward from the hub. Requests travel toward it.
+          data: { pulseStatus: pulse?.status ?? "idle", label: pulse?.label, reverseTravel: true },
         };
       }),
     ];
 
-    for (const e of endpoints) {
-      const endpointClients = clients.filter((c) => c.endpointId === e.id);
-      if (endpointClients.length === 0) continue;
-      const endpointY = TOP_MARGIN + endpoints.indexOf(e) * ROW_HEIGHT;
-      const fanStartY =
-        endpointY - ((endpointClients.length - 1) * CLIENT_ROW_HEIGHT) / 2 + 24;
+    for (const { endpoint: e, clients: endpointClients, clientHeight, center } of placedEndpoints) {
+      const fanStartY = center - clientHeight / 2;
 
       endpointClients.forEach((c, ci) => {
         const nodeId = `client-${e.id}-${c.clientId}`;
@@ -324,7 +352,9 @@ export function GatewayFlow({
     return { nodes, edges };
   }, [servers, endpoints, clients, pulses]);
 
-  const nodeIdsSignature = useMemo(() => nodes.map((n) => n.id).sort().join(","), [nodes]);
+  const nodeIdsSignature = useMemo(() => JSON.stringify(
+    nodes.map(({ id, position: { x, y } }) => ({ id, x, y })).sort((a, b) => a.id.localeCompare(b.id))
+  ), [nodes]);
 
   // Hidden until the very first fit is confirmed applied, then revealed — see AutoFitView's
   // comment for why this is necessary (a useEffect-driven fit can't prevent the browser from
@@ -345,7 +375,7 @@ export function GatewayFlow({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
+        fitViewOptions={{ padding: FLOW_PADDING }}
         minZoom={0.15}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}

@@ -43,18 +43,35 @@ jobs:
           test "v$VERSION" = "$GITHUB_REF_NAME"
       - run: npm install -g npm@11.19.0
       - run: npm publish "$PWD"/release/*.tgz --ignore-scripts --access public
+
+  verify-registry:
+    needs: publish-npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: gateway-npm-package
+          path: release
       - name: Verify the immutable registry artifact
         run: |
           PACKAGE="$(node -p 'const p = require("./release/pack.json")[0]; p.name + "@" + p.version')"
           EXPECTED="$(node -p 'require("./release/pack.json")[0].integrity')"
-          for attempt in 1 2 3 4 5 6; do
-            if test "$(npm view "$PACKAGE" dist.integrity --prefer-online)" = "$EXPECTED"; then exit 0; fi
-            sleep 5
+          for attempt in $(seq 1 72); do
+            if ACTUAL="$(npm view "$PACKAGE" dist.integrity --prefer-online --registry=https://registry.npmjs.org 2>/dev/null)" && test -n "$ACTUAL"; then
+              test "$ACTUAL" = "$EXPECTED" || { echo "Registry integrity differs from the tested artifact"; exit 1; }
+              exit 0
+            fi
+            sleep 10
           done
+          echo "$PACKAGE did not become available in the public registry within the verification window"
           exit 1
 
   github-release:
-    needs: publish-npm
+    needs: verify-registry
     runs-on: ubuntu-latest
     permissions:
       contents: write
