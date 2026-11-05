@@ -42,7 +42,7 @@ jobs:
           VERSION="$(node -p 'require("./release/pack.json")[0].version')"
           test "v$VERSION" = "$GITHUB_REF_NAME"
       - run: npm install -g npm@11.19.0
-      - run: npm publish release/*.tgz --ignore-scripts --access public
+      - run: npm publish "$PWD"/release/*.tgz --ignore-scripts --access public
       - name: Verify the immutable registry artifact
         run: |
           PACKAGE="$(node -p 'const p = require("./release/pack.json")[0]; p.name + "@" + p.version')"
