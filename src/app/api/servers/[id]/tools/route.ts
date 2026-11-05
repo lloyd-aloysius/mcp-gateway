@@ -1,14 +1,16 @@
+import { readJsonBody } from "@/server/http/json-body";
+import { withAdmin } from "@/server/http/admin";
 import { randomUUID } from "node:crypto";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/server/db/client";
+import { getDb } from "@/server/db/client";
 import { backendServerTools } from "@/server/db/schema";
 import { toolToggleInputSchema } from "@/lib/validation";
 import { getConnection } from "@/server/gateway/backend-registry";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, { params }: Params) {
+async function get(_req: Request, { params }: Params) {
   const { id } = await params;
   const conn = getConnection(id);
   if (!conn || !conn.client) {
@@ -17,7 +19,7 @@ export async function GET(_req: Request, { params }: Params) {
 
   const [{ tools }, toggles] = await Promise.all([
     conn.client.listTools(),
-    db.select().from(backendServerTools).where(eq(backendServerTools.backendServerId, id)),
+    getDb().select().from(backendServerTools).where(eq(backendServerTools.backendServerId, id)),
   ]);
 
   const toggleByName = new Map(toggles.map((t) => [t.toolName, t.enabled]));
@@ -30,34 +32,21 @@ export async function GET(_req: Request, { params }: Params) {
   );
 }
 
-export async function PUT(req: Request, { params }: Params) {
+async function put(req: Request, { params }: Params) {
   const { id } = await params;
-  const body = await req.json();
+  const body = await readJsonBody(req);
   const parsed = toolToggleInputSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const { toolName, enabled } = parsed.data;
 
-  const [existing] = await db
-    .select()
-    .from(backendServerTools)
-    .where(and(eq(backendServerTools.backendServerId, id), eq(backendServerTools.toolName, toolName)))
-    .limit(1);
-
-  let row;
-  if (existing) {
-    [row] = await db
-      .update(backendServerTools)
-      .set({ enabled, updatedAt: new Date() })
-      .where(eq(backendServerTools.id, existing.id))
-      .returning();
-  } else {
-    [row] = await db
-      .insert(backendServerTools)
-      .values({ id: randomUUID(), backendServerId: id, toolName, enabled })
-      .returning();
-  }
-
+  const [row] = await getDb().insert(backendServerTools)
+    .values({id: randomUUID(), backendServerId: id, toolName, enabled})
+    .onConflictDoUpdate({ target: [backendServerTools.backendServerId, backendServerTools.toolName], set: {enabled, updatedAt: new Date()} })
+    .returning();
   return NextResponse.json(row);
 }
+
+export const GET = withAdmin(get);
+export const PUT = withAdmin(put);

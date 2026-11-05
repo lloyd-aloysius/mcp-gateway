@@ -46,6 +46,7 @@ export default function NewEndpointPage() {
     id: string;
     slug: string;
     tokenPrefix: string;
+    authMode?: "bearer" | "oauth";
     token: string;
   } | null>(null);
   const [slugTouched, setSlugTouched] = useState(false);
@@ -69,7 +70,7 @@ export default function NewEndpointPage() {
     }
 
     const data = await res.json();
-    setCreated({ id: data.id, slug: data.slug, tokenPrefix: data.tokenPrefix, token: data.token });
+    setCreated({ id: data.id, slug: data.slug, tokenPrefix: data.tokenPrefix, authMode: data.authMode, token: data.token });
   }
 
   if (created) {
@@ -92,6 +93,7 @@ export default function NewEndpointPage() {
               endpointId={created.id}
               slug={created.slug}
               tokenPrefix={created.tokenPrefix}
+              authMode={created.authMode}
               revealedToken={created.token}
               onTokenRegenerated={(token) => setCreated((c) => (c ? { ...c, token } : c))}
             />

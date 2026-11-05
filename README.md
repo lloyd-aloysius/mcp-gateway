@@ -15,7 +15,7 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 - **Edit in place** — change a server's command, arguments, environment variables, or headers after creation without deleting and re-adding it.
 - **Per-tool kill switch** — disable individual tools on a server; a disabled tool disappears from every endpoint's tool list and is blocked from being called, regardless of that endpoint's access policy.
 - **One-click and bulk reconnect** — reconnect a single server or every enabled server at once, without restarting the gateway process.
-- **Built-in admin server** — a "Gateway Server Tools" server auto-seeds on first boot, exposing health-check tools (`ping`, `gateway_status`) plus `list_backend_servers` and `add_backend_server` — meaning an MCP client with access can introspect and register new backend servers through natural conversation, not just the dashboard. Fully manageable (edit/disable/delete/reconnect) like any other server.
+- **Built-in diagnostics** — Gateway Server Tools auto-seeds on first boot and provides `ping`, `gateway_status`, and `list_backend_servers`. Use the dashboard to register and manage backends.
 
 ### Client endpoints & access control
 
@@ -33,10 +33,12 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 
 ### Security & deployment
 
+- **Interactive backends** — elicitation and sampling are off on shared connections. An operator can opt in specific endpoint and backend pairs to run interactive calls on isolated connections.
+
 - **No stored plaintext where it's avoidable** — endpoint tokens are hashed (SHA-256) at rest, never stored or retrievable in plaintext after creation.
 - **CSRF-protected admin API** — mutating admin requests are checked against the app's own origin, closing off the class of attack where a malicious webpage tries to reach the locally-bound dashboard through a victim's browser.
 - **Tailscale-aware** — detects an active tailnet connection and surfaces the real MagicDNS hostname/IP on the Settings page, with a dedicated config tab for Tailscale-based remote client access.
-- **Runs anywhere Node runs** — install via `npx`, `npm install -g`, or clone-and-run; ships as a self-contained CLI with no separate build step for consumers, automatic SQLite creation and migrations on first boot, and `.env`-based configuration.
+- **Installable Node CLI** — install via `npx`, `npm install -g`, or clone-and-run; ships as a self-contained CLI with no separate build step for consumers, automatic SQLite creation and migrations on first boot, and `.env`-based configuration.
 - **CI-verified releases** — every push runs typecheck/lint/build; tagged releases automatically publish to npm (via OIDC Trusted Publishing — no stored npm token) and create a GitHub Release with auto-generated notes.
 
 ## Screenshots
@@ -119,7 +121,7 @@ A `Dockerfile` is included for running the gateway in a container instead of ins
 git clone <this-repo>
 cd mcp-gateway
 docker build -t mcp-gateway .
-docker run -d --name mcp-gateway -p 3000:3000 -v mcp-gateway-data:/data mcp-gateway
+docker run -d --name mcp-gateway --env-file .env -p 127.0.0.1:3000:3000 -v mcp-gateway-data:/data mcp-gateway
 ```
 
 Open [http://localhost:3000](http://localhost:3000). The `-v mcp-gateway-data:/data` volume is where the SQLite database lives — keep it (don't use `--rm`) so your servers, endpoints, and audit history survive container restarts and image updates.
@@ -161,11 +163,24 @@ Copy `.env.example` to `.env` to override defaults:
 
 ## Security notes
 
-There is **no login on this dashboard** — it's designed for personal, single-user, self-hosted use, not multi-tenant deployment. Anyone who can reach the dashboard's URL can manage servers, endpoints, and tokens. Keep it bound to `127.0.0.1` (the default) or behind your own firewall/VPN/SSH tunnel if you need remote access — the Settings page shows a warning if it detects it's being accessed from somewhere other than localhost.
+The CLI defaults to loopback. Remote and container administration requires a dedicated
+`MCP_GATEWAY_ADMIN_TOKEN` of at least 24 characters and a trusted dashboard origin in
+`MCP_GATEWAY_ADMIN_ORIGINS`. In a browser, use the username `admin` and the token as the
+password. Admin scripts can use the token as a bearer credential. Keep the dashboard
+behind TLS and restrict it to administrator devices. Give MCP clients a separate
+hostname and forward only their MCP routes.
 
-The admin API also rejects cross-origin requests (mismatched `Origin` header) on all mutating routes, so a malicious page in another browser tab can't reach it even while the dashboard is open — that's a defense against a browser being used as a confused deputy, not a substitute for the network boundary above.
+The admin API validates the request host and any supplied Origin against the configured dashboard origins. The reverse proxy should preserve the trusted Host and forward only the routes each hostname needs.
 
 Client endpoint tokens are stored as SHA-256 hashes, never in plaintext — a token is shown once at creation (or after a regeneration) and cannot be retrieved again afterward.
+
+Private or plain HTTP backend origins require an explicit
+`MCP_GATEWAY_PRIVATE_BACKEND_ORIGINS` entry. Backend header and environment values
+are write-only. Use references such as `${env:MCP_BACKEND_SECRET_EXAMPLE}` to keep
+credentials outside SQLite. Audit capture defaults to operation metadata.
+
+See the [deployment and recovery guide](docs/deployment/README.md) for a nonroot
+Compose example, nginx configuration, backup, restore and rollback.
 
 Found an actual security issue? Please see [SECURITY.md](SECURITY.md) for how to report it privately rather than opening a public issue.
 
@@ -173,9 +188,12 @@ Found an actual security issue? Please see [SECURITY.md](SECURITY.md) for how to
 
 Next.js (App Router) · TypeScript · `@modelcontextprotocol/sdk` · Drizzle ORM + SQLite · Tailwind CSS + shadcn/ui · React Flow · Server-Sent Events
 
-## Roadmap / not in v1
+## Release verification
 
-Multi-user auth, dashboard login, per-tool (rather than per-server) access granularity, OAuth passthrough for authenticated remote backends, hot-reloading config without a restart, scheduled/emailed audit reports.
+The release workflow tests the same npm tarball on Linux x64, Linux arm64 and
+macOS arm64. It also builds and tests nonroot Linux container images and produces
+component inventories for both distribution formats. Run `mcp-gateway --version`
+or `mcp-gateway doctor` to check a local install.
 
 ## Contributing
 

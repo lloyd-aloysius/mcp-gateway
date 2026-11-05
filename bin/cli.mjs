@@ -8,10 +8,41 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const version = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")).version;
+if (process.argv.includes("--version") || process.argv.includes("-v")) {
+  console.log(version);
+  process.exit(0);
+}
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  console.log(`mcp-gateway ${version}
+
+Usage: mcp-gateway [--help | --version | doctor]
+
+Configuration: .env, HOST, PORT, DATABASE_PATH, MCP_GATEWAY_ADMIN_TOKEN`);
+  process.exit(0);
+}
 const serverEntry = path.join(packageRoot, ".next", "standalone", "server.js");
+if (process.argv[2] === "doctor") {
+  const report = { version, node: process.version, platform: process.platform, arch: process.arch };
+  try {
+    const Database = createRequire(serverEntry)("better-sqlite3");
+    const database = new Database(":memory:");
+    try {
+      report.sqlite = database.prepare("SELECT sqlite_version()").pluck().get();
+    } finally {
+      database.close();
+    }
+  } catch {
+    report.sqlite = "unavailable";
+    process.exitCode = 1;
+  }
+  console.log(JSON.stringify(report));
+  process.exit();
+}
 
 if (!existsSync(serverEntry)) {
   console.error(
@@ -51,7 +82,7 @@ const databasePath = process.env.DATABASE_PATH
   : path.join(userCwd, "data", "gateway.db");
 
 const port = process.env.PORT || "3000";
-const hostname = process.env.HOSTNAME || process.env.HOST || "127.0.0.1";
+const hostname = process.env.HOST || process.env.HOSTNAME || "127.0.0.1";
 
 console.log(`mcp-gateway: starting on http://${hostname}:${port}`);
 console.log(`mcp-gateway: database at ${databasePath}`);
@@ -64,7 +95,15 @@ const child = spawn(process.execPath, [serverEntry], {
     PORT: port,
     HOSTNAME: hostname,
     DATABASE_PATH: databasePath,
+    NEXT_MANUAL_SIG_HANDLE: "1",
   },
 });
 
-child.on("exit", (code) => process.exit(code ?? 0));
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.once(signal, () => child.kill(signal));
+}
+child.on("error", (error) => {
+  console.error("mcp-gateway: could not start server", error.message);
+  process.exit(1);
+});
+child.on("exit", (code, signal) => process.exit(code ?? (signal === "SIGINT" ? 130 : 143)));

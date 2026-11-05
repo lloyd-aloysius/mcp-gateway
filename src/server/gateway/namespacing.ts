@@ -19,9 +19,16 @@ export function encodeResourceUri(serverKey: string, uri: string): string {
   return `gateway://${serverKey}/${encodeURIComponent(uri)}`;
 }
 
+export function encodeResourceTemplate(serverKey: string, template: string): string {
+  return `gateway-template://${serverKey}/${template}`;
+}
+
 export function decodeResourceUri(
   gatewayUri: string
 ): { serverKey: string; originalUri: string } | null {
+  const template = /^gateway-template:\/\/([^/]+)\/(.+)$/.exec(gatewayUri);
+  if (template) return { serverKey: template[1], originalUri: template[2] };
+
   const match = /^gateway:\/\/([^/]+)\/(.+)$/.exec(gatewayUri);
   if (!match) return null;
   const [, serverKey, encoded] = match;

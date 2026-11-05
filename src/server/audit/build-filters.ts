@@ -1,8 +1,12 @@
 import { eq, like, gte, lte, or, type SQL } from "drizzle-orm";
+import { InvalidRequestBody } from "../http/json-body";
 import { auditLog } from "../db/schema";
 
 export function buildAuditFilters(searchParams: URLSearchParams): SQL[] {
   const filters: SQL[] = [];
+  for (const [, value] of searchParams) {
+    if (value.length > 256) throw new InvalidRequestBody(400, "Audit filter is too long");
+  }
 
   const endpointId = searchParams.get("endpointId");
   if (endpointId) filters.push(eq(auditLog.endpointId, endpointId));
@@ -34,10 +38,18 @@ export function buildAuditFilters(searchParams: URLSearchParams): SQL[] {
   }
 
   const from = searchParams.get("from");
-  if (from) filters.push(gte(auditLog.timestamp, new Date(from)));
+  if (from) {
+    const date = new Date(from);
+    if (!Number.isFinite(date.getTime())) throw new InvalidRequestBody(400, "Invalid from date");
+    filters.push(gte(auditLog.timestamp, date));
+  }
 
   const to = searchParams.get("to");
-  if (to) filters.push(lte(auditLog.timestamp, new Date(to)));
+  if (to) {
+    const date = new Date(to);
+    if (!Number.isFinite(date.getTime())) throw new InvalidRequestBody(400, "Invalid to date");
+    filters.push(lte(auditLog.timestamp, date));
+  }
 
   return filters;
 }

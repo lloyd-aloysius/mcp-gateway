@@ -2,27 +2,21 @@
 
 ## Threat model (read this first)
 
-MCP Gateway is designed for **personal, single-user, self-hosted use**. By
-design:
+MCP Gateway is a personal, single-operator service. A loopback-bound installation
+can use local administration. Remote administration requires a separate
+administrator credential and a trusted origin. Endpoint bearer tokens grant
+access to MCP capabilities according to endpoint policy. The administrator can
+configure executable backend programs, so run the service under a dedicated
+account and grant access only to trusted operators.
 
-- There is **no login/authentication on the dashboard itself**. Anyone who can
-  reach the dashboard's URL can manage backend servers, endpoints, and tokens.
-- Client *endpoints* (the URLs you hand out to MCP clients) are protected by a
-  bearer token, hashed with SHA-256 at rest.
-- The safety boundary is meant to be the network, not the app: bind to
-  `127.0.0.1` (the default) and use your own firewall/VPN/SSH tunnel/Tailscale
-  for remote access. The Settings page warns if it detects non-localhost
-  access.
-
-**"The dashboard has no login" is a known, intentional design trade-off, not a
-vulnerability** — please don't open a report for it. See the README's
-[Security notes](README.md#security-notes) section for the full rationale.
+Use HTTPS and separate the admin and MCP ingress. Configure private backend
+destinations explicitly and keep service storage and backups private. See the
+[deployment guide](docs/deployment/README.md).
 
 ## Supported versions
 
-This project doesn't yet follow a formal versioning/release process — only
-the `main` branch is supported. Please make sure you're on the latest commit
-before reporting an issue.
+Apply security fixes using the latest stable npm version or a newer reviewed
+source revision. Release notes identify compatibility and migration requirements.
 
 ## Reporting a vulnerability
 

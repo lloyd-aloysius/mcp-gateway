@@ -1,20 +1,27 @@
 import { randomUUID } from "node:crypto";
-import { eq, and } from "drizzle-orm";
-import { db } from "../db/client";
-import { backendServerTools, type ClientEndpoint } from "../db/schema";
-import { encodeName, decodeName, encodeResourceUri, decodeResourceUri } from "./namespacing";
+import { getDb } from "../db/client";
+import { backendServers, type ClientEndpoint } from "../db/schema";
+import { encodeName, decodeName, encodeResourceUri, decodeResourceUri, encodeResourceTemplate } from "./namespacing";
 import { evaluateAccess } from "./access-control";
 import { getAllConnections, getConnectionByKey, type BackendConnection } from "./backend-registry";
-import { registerInFlightCall, unregisterInFlightCall } from "./in-flight-calls";
+import { BUILTIN_GATEWAY_TOOLS_SERVER_KEY } from "./seed-builtin-server";
 import { recordAudit, getServerRow } from "./dispatch-shared";
 import { emitGatewayEvent } from "../events/bus";
+import { listBackendItems, requestBackend } from "./backend-requests";
 
-async function getDisabledToolNames(backendServerId: string): Promise<Set<string>> {
-  const rows = await db
-    .select({ toolName: backendServerTools.toolName })
-    .from(backendServerTools)
-    .where(and(eq(backendServerTools.backendServerId, backendServerId), eq(backendServerTools.enabled, false)));
-  return new Set(rows.map((r) => r.toolName));
+import { callIsolatedBackend, interactiveRouteEnabled, type InteractiveCallContext } from "./interactive-call";
+import { getToolPolicy } from "./tool-policy";
+
+async function listBackendSummaries() {
+  const servers = await getDb().select({
+    id: backendServers.id,
+    key: backendServers.key,
+    name: backendServers.name,
+    connectionType: backendServers.connectionType,
+    enabled: backendServers.enabled,
+    status: backendServers.status,
+  }).from(backendServers);
+  return { content: [{ type: "text" as const, text: JSON.stringify(servers, null, 2) }] };
 }
 
 export class DispatchError extends Error {
@@ -44,21 +51,32 @@ async function allowedConnections(endpoint: ClientEndpoint): Promise<BackendConn
 export async function dispatchListTools(
   endpoint: ClientEndpoint,
   sessionId: string | null,
-  clientId: string | null
+  clientId: string | null,
+  signal?: AbortSignal
 ) {
   const conns = await allowedConnections(endpoint);
   const results = await Promise.allSettled(
-    conns.map(async (conn) => {
-      const [{ tools }, disabled] = await Promise.all([conn.client!.listTools(), getDisabledToolNames(conn.id)]);
-      return tools
-        .filter((t) => !disabled.has(t.name))
-        .map((t) => ({ ...t, name: encodeName(conn.key, t.name) }));
+    conns.filter((conn) => conn.client?.getServerCapabilities()?.tools).map(async (conn) => {
+      const [{ items: tools, partial }, policy] = await Promise.all([
+        requestBackend(conn, signal, (client, options) => listBackendItems(async (cursor) => {
+          const page = await client.listTools({ cursor }, options);
+          return { items: page.tools, nextCursor: page.nextCursor };
+        }), 5_000),
+        getToolPolicy(endpoint.id, conn.id, conn.key),
+      ]);
+      return { partial, items: tools
+        .filter((t) => policy.denial(t.name) === null)
+        .map((t) => ({ ...t, name: encodeName(conn.key, t.name) })) };
+
     })
   );
-  await recordAudit({ endpoint, sessionId, clientId, operationType: "tools/list", status: "success" });
-  return results
-    .filter((r) => r.status === "fulfilled")
-    .flatMap((r) => (r as PromiseFulfilledResult<unknown[]>).value);
+  const partial = results.some((result) => result.status === "rejected" || result.value.partial);
+  await recordAudit({ endpoint, sessionId, clientId, operationType: "tools/list",
+    status: partial ? "error" : "success", errorMessage: partial ? "Partial backend discovery" : undefined });
+  return {
+    tools: results.flatMap((result) => result.status === "fulfilled" ? result.value.items : []),
+    ...(partial ? { _meta: { "mcp-gateway/partial": true } } : {}),
+  };
 }
 
 export async function dispatchCallTool(
@@ -66,7 +84,9 @@ export async function dispatchCallTool(
   namespacedName: string,
   args: Record<string, unknown> | undefined,
   sessionId: string | null,
-  clientId: string | null
+  clientId: string | null,
+  signal?: AbortSignal,
+  interactive?: InteractiveCallContext
 ) {
   const callId = randomUUID();
   const decoded = decodeName(namespacedName);
@@ -124,8 +144,8 @@ export async function dispatchCallTool(
     throw new DispatchError(`Access denied for tool: ${namespacedName}`);
   }
 
-  const disabledTools = await getDisabledToolNames(row.id);
-  if (disabledTools.has(decoded.originalName)) {
+  const toolDenial = (await getToolPolicy(endpoint.id, row.id, row.key)).denial(decoded.originalName);
+  if (toolDenial) {
     // Tool is disabled at the gateway (global per-server kill switch), never reaching the
     // backend — mirror the access-denied branch above so the diagram/audit trail treat it
     // identically to a policy denial.
@@ -151,10 +171,10 @@ export async function dispatchCallTool(
       itemName: namespacedName,
       args,
       status: "denied",
-      errorMessage: "tool disabled",
+      errorMessage: toolDenial,
     });
     emitGatewayEvent({ type: "call.finished", callId, status: "denied", durationMs: 0 });
-    throw new DispatchError(`Tool disabled: ${namespacedName}`);
+    throw new DispatchError(`${toolDenial}: ${namespacedName}`);
   }
 
   emitGatewayEvent({
@@ -171,15 +191,16 @@ export async function dispatchCallTool(
   });
 
   const startedAt = Date.now();
-  // Tracked so an elicitation/sampling request arriving on this connection
-  // mid-call (this shared conn.client can have several endpoints' calls in
-  // flight at once) can be traced back to this specific call - see
-  // in-flight-calls.ts for why the SDK gives us no way to do this itself.
-  registerInFlightCall(conn.id, { callId, endpointId: endpoint.id, sessionId, clientId, startedAt });
   try {
     if (!conn.client) throw new DispatchError("backend not connected");
-    const result = await conn.client.callTool({ name: decoded.originalName, arguments: args });
+    const params = { name: decoded.originalName, arguments: args };
+    const result = row.key === BUILTIN_GATEWAY_TOOLS_SERVER_KEY && params.name === "list_backend_servers"
+      ? await listBackendSummaries()
+      : interactive && interactiveRouteEnabled(endpoint.slug, row.key)
+        ? await callIsolatedBackend(conn, params, interactive)
+        : await requestBackend(conn, signal, (client, options) => client.callTool(params, undefined, options));
     const durationMs = Date.now() - startedAt;
+    const status = "isError" in result && result.isError ? "error" : "success";
     await recordAudit({
       endpoint,
       backendServerId: row.id,
@@ -189,14 +210,14 @@ export async function dispatchCallTool(
       operationType: "tools/call",
       itemName: namespacedName,
       args,
-      status: "success",
+      status,
       durationMs,
     });
-    emitGatewayEvent({ type: "call.finished", callId, status: "success", durationMs });
+    emitGatewayEvent({ type: "call.finished", callId, status, durationMs });
     return result;
   } catch (err) {
     const durationMs = Date.now() - startedAt;
-    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorMessage = "Backend tool request failed";
     await recordAudit({
       endpoint,
       backendServerId: row.id,
@@ -211,35 +232,69 @@ export async function dispatchCallTool(
       errorMessage,
     });
     emitGatewayEvent({ type: "call.finished", callId, status: "error", durationMs, error: errorMessage });
-    throw err;
-  } finally {
-    unregisterInFlightCall(conn.id, callId);
+    if (err instanceof DispatchError) throw err;
+    throw new DispatchError("Backend request failed");
   }
 }
 
 export async function dispatchListResources(
   endpoint: ClientEndpoint,
   sessionId: string | null,
-  clientId: string | null
+  clientId: string | null,
+  signal?: AbortSignal
 ) {
   const conns = await allowedConnections(endpoint);
   const results = await Promise.allSettled(
-    conns.map(async (conn) => {
-      const { resources } = await conn.client!.listResources();
-      return resources.map((r) => ({ ...r, uri: encodeResourceUri(conn.key, r.uri) }));
+    conns.filter((conn) => conn.client?.getServerCapabilities()?.resources).map(async (conn) => {
+      const { items, partial } = await requestBackend(conn, signal, (client, options) => listBackendItems(async (cursor) => {
+        const page = await client.listResources({ cursor }, options);
+        return { items: page.resources, nextCursor: page.nextCursor };
+      }), 5_000);
+      return { partial, items: items.map((r) => ({ ...r, uri: encodeResourceUri(conn.key, r.uri) })) };
     })
   );
-  await recordAudit({ endpoint, sessionId, clientId, operationType: "resources/list", status: "success" });
-  return results
-    .filter((r) => r.status === "fulfilled")
-    .flatMap((r) => (r as PromiseFulfilledResult<unknown[]>).value);
+  const partial = results.some((result) => result.status === "rejected" || result.value.partial);
+  await recordAudit({ endpoint, sessionId, clientId, operationType: "resources/list",
+    status: partial ? "error" : "success", errorMessage: partial ? "Partial backend discovery" : undefined });
+  return {
+    resources: results.flatMap((result) => result.status === "fulfilled" ? result.value.items : []),
+    ...(partial ? { _meta: { "mcp-gateway/partial": true } } : {}),
+  };
+}
+
+export async function dispatchListResourceTemplates(
+  endpoint: ClientEndpoint,
+  sessionId: string | null,
+  clientId: string | null,
+  signal?: AbortSignal
+) {
+  const conns = await allowedConnections(endpoint);
+  const results = await Promise.allSettled(
+    conns.filter((conn) => conn.client?.getServerCapabilities()?.resources).map(async (conn) => {
+      const { items, partial } = await requestBackend(conn, signal, (client, options) => listBackendItems(async (cursor) => {
+        const page = await client.listResourceTemplates({ cursor }, options);
+        return { items: page.resourceTemplates, nextCursor: page.nextCursor };
+      }), 5_000);
+      return { partial, items: items.map((template) => ({
+        ...template, uriTemplate: encodeResourceTemplate(conn.key, template.uriTemplate),
+      })) };
+    })
+  );
+  const partial = results.some((result) => result.status === "rejected" || result.value.partial);
+  await recordAudit({ endpoint, sessionId, clientId, operationType: "resources/templates/list",
+    status: partial ? "error" : "success", errorMessage: partial ? "Partial backend discovery" : undefined });
+  return {
+    resourceTemplates: results.flatMap((result) => result.status === "fulfilled" ? result.value.items : []),
+    ...(partial ? { _meta: { "mcp-gateway/partial": true } } : {}),
+  };
 }
 
 export async function dispatchReadResource(
   endpoint: ClientEndpoint,
   gatewayUri: string,
   sessionId: string | null,
-  clientId: string | null
+  clientId: string | null,
+  signal?: AbortSignal
 ) {
   const decoded = decodeResourceUri(gatewayUri);
   if (!decoded) throw new DispatchError(`Unknown resource: ${gatewayUri}`);
@@ -265,7 +320,7 @@ export async function dispatchReadResource(
 
   const startedAt = Date.now();
   try {
-    const result = await conn.client!.readResource({ uri: decoded.originalUri });
+    const result = await requestBackend(conn, signal, (client, options) => client.readResource({ uri: decoded.originalUri }, options));
     await recordAudit({
       endpoint,
       backendServerId: row.id,
@@ -277,7 +332,7 @@ export async function dispatchReadResource(
       status: "success",
       durationMs: Date.now() - startedAt,
     });
-    return result;
+    return { ...result, contents: result.contents.map((entry) => ({ ...entry, uri: encodeResourceUri(conn.key, entry.uri) })) };
   } catch (err) {
     await recordAudit({
       endpoint,
@@ -289,28 +344,36 @@ export async function dispatchReadResource(
       itemName: gatewayUri,
       status: "error",
       durationMs: Date.now() - startedAt,
-      errorMessage: err instanceof Error ? err.message : String(err),
+      errorMessage: "Backend request failed",
     });
-    throw err;
+    if (err instanceof DispatchError) throw err;
+    throw new DispatchError("Backend request failed");
   }
 }
 
 export async function dispatchListPrompts(
   endpoint: ClientEndpoint,
   sessionId: string | null,
-  clientId: string | null
+  clientId: string | null,
+  signal?: AbortSignal
 ) {
   const conns = await allowedConnections(endpoint);
   const results = await Promise.allSettled(
-    conns.map(async (conn) => {
-      const { prompts } = await conn.client!.listPrompts();
-      return prompts.map((p) => ({ ...p, name: encodeName(conn.key, p.name) }));
+    conns.filter((conn) => conn.client?.getServerCapabilities()?.prompts).map(async (conn) => {
+      const { items, partial } = await requestBackend(conn, signal, (client, options) => listBackendItems(async (cursor) => {
+        const page = await client.listPrompts({ cursor }, options);
+        return { items: page.prompts, nextCursor: page.nextCursor };
+      }), 5_000);
+      return { partial, items: items.map((p) => ({ ...p, name: encodeName(conn.key, p.name) })) };
     })
   );
-  await recordAudit({ endpoint, sessionId, clientId, operationType: "prompts/list", status: "success" });
-  return results
-    .filter((r) => r.status === "fulfilled")
-    .flatMap((r) => (r as PromiseFulfilledResult<unknown[]>).value);
+  const partial = results.some((result) => result.status === "rejected" || result.value.partial);
+  await recordAudit({ endpoint, sessionId, clientId, operationType: "prompts/list",
+    status: partial ? "error" : "success", errorMessage: partial ? "Partial backend discovery" : undefined });
+  return {
+    prompts: results.flatMap((result) => result.status === "fulfilled" ? result.value.items : []),
+    ...(partial ? { _meta: { "mcp-gateway/partial": true } } : {}),
+  };
 }
 
 export async function dispatchGetPrompt(
@@ -318,7 +381,8 @@ export async function dispatchGetPrompt(
   namespacedName: string,
   args: Record<string, string> | undefined,
   sessionId: string | null,
-  clientId: string | null
+  clientId: string | null,
+  signal?: AbortSignal
 ) {
   const decoded = decodeName(namespacedName);
   if (!decoded) throw new DispatchError(`Unknown prompt: ${namespacedName}`);
@@ -344,7 +408,7 @@ export async function dispatchGetPrompt(
 
   const startedAt = Date.now();
   try {
-    const result = await conn.client!.getPrompt({ name: decoded.originalName, arguments: args });
+    const result = await requestBackend(conn, signal, (client, options) => client.getPrompt({ name: decoded.originalName, arguments: args }, options));
     await recordAudit({
       endpoint,
       clientId,
@@ -368,8 +432,9 @@ export async function dispatchGetPrompt(
       itemName: namespacedName,
       status: "error",
       durationMs: Date.now() - startedAt,
-      errorMessage: err instanceof Error ? err.message : String(err),
+      errorMessage: "Backend request failed",
     });
-    throw err;
+    if (err instanceof DispatchError) throw err;
+    throw new DispatchError("Backend request failed");
   }
 }

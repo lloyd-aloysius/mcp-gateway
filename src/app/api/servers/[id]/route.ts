@@ -1,55 +1,64 @@
+import { validateBackendUrl } from "@/server/gateway/egress";
+import { mergeBackendValues, publicBackend } from "@/server/gateway/backend-secrets";
+import { readJsonBody } from "@/server/http/json-body";
+import { withAdmin } from "@/server/http/admin";
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/server/db/client";
+import { getDb } from "@/server/db/client";
 import { backendServers } from "@/server/db/schema";
 import { backendServerUpdateSchema } from "@/lib/validation";
 import { addOrReplaceConnection, getConnection, removeConnection } from "@/server/gateway/backend-registry";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, { params }: Params) {
+async function get(_req: Request, { params }: Params) {
   const { id } = await params;
-  const [row] = await db.select().from(backendServers).where(eq(backendServers.id, id)).limit(1);
+  const [row] = await getDb().select().from(backendServers).where(eq(backendServers.id, id)).limit(1);
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json({ ...row, pid: getConnection(row.id)?.pid ?? null });
+  return NextResponse.json({ ...publicBackend(row), pid: getConnection(row.id)?.pid ?? null });
 }
 
-export async function PATCH(req: Request, { params }: Params) {
+async function patch(req: Request, { params }: Params) {
   const { id } = await params;
-  const body = await req.json();
+  const body = await readJsonBody(req);
   const parsed = backendServerUpdateSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const input = parsed.data;
 
-  const [existing] = await db.select().from(backendServers).where(eq(backendServers.id, id)).limit(1);
-  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (input.url !== undefined) {
+    try {
+      validateBackendUrl(input.url);
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid backend URL" }, { status: 400 });
+    }
+  }
 
-  const [row] = await db
-    .update(backendServers)
-    .set({
-      name: input.name ?? existing.name,
-      description: input.description ?? existing.description,
-      command: "command" in input ? input.command : existing.command,
-      args: "args" in input ? input.args : existing.args,
-      env: "env" in input ? input.env : existing.env,
-      url: "url" in input ? input.url : existing.url,
-      headers: "headers" in input ? input.headers : existing.headers,
-      enabled: input.enabled ?? existing.enabled,
+  const row = getDb().transaction((tx) => {
+    const existing = tx.select().from(backendServers).where(eq(backendServers.id, id)).get();
+    if (!existing) return undefined;
+    return tx.update(backendServers).set({
+      ...input,
+      env: input.env === undefined ? undefined : mergeBackendValues(existing.env, input.env),
+      headers: input.headers === undefined ? undefined : mergeBackendValues(existing.headers, input.headers),
       updatedAt: new Date(),
-    })
-    .where(eq(backendServers.id, id))
-    .returning();
+    }).where(eq(backendServers.id, id)).returning().get();
+  });
 
+  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
   void addOrReplaceConnection(row);
 
-  return NextResponse.json(row);
+  return NextResponse.json(publicBackend(row));
 }
 
-export async function DELETE(_req: Request, { params }: Params) {
+async function remove(_req: Request, { params }: Params) {
   const { id } = await params;
+  await getDb().delete(backendServers).where(eq(backendServers.id, id));
   await removeConnection(id);
-  await db.delete(backendServers).where(eq(backendServers.id, id));
   return NextResponse.json({ ok: true });
 }
+
+export const GET = withAdmin(get);
+export const PATCH = withAdmin(patch);
+export const DELETE = withAdmin(remove);

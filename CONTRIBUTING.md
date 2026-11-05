@@ -87,6 +87,11 @@ All three should be clean. If you're touching UI, actually click through the
 affected page(s) in a browser — type-checking and linting verify code
 correctness, not feature correctness.
 
+For changes to authorization or gateway startup, run `npm run test:security`
+after building. The suite starts a loopback gateway with a temporary SQLite
+database and fixture backends. Set `GATEWAY_TEST_CLI` to test a different build
+or an unpacked npm release.
+
 ## Commit messages / PRs
 
 - Keep commits focused; a bug fix doesn't need to bundle unrelated cleanup.

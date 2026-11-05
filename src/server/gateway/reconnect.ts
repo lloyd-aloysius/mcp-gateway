@@ -1,4 +1,4 @@
-import { db } from "../db/client";
+import { getDb } from "../db/client";
 import { auditLog } from "../db/schema";
 import { addOrReplaceConnection } from "./backend-registry";
 import type { BackendServer } from "../db/schema";
@@ -6,7 +6,7 @@ import type { BackendServer } from "../db/schema";
 export async function reconnectBackendServer(row: BackendServer) {
   const conn = await addOrReplaceConnection(row);
 
-  await db.insert(auditLog).values({
+  await getDb().insert(auditLog).values({
     backendServerId: row.id,
     backendServerKeySnapshot: row.key,
     operationType: conn.status === "connected" ? "connect" : "disconnect",

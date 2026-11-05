@@ -1,49 +1,51 @@
-import { subscribeToGatewayEvents } from "@/server/events/bus";
+import { withAdmin } from "@/server/http/admin";
+import { gatewayEventSubscribers, subscribeToGatewayEvents } from "@/server/events/bus";
 
-export async function GET(req: Request) {
+async function get(req: Request) {
+  if (gatewayEventSubscribers() >= 32) {
+    return Response.json({ error: "Too many dashboard streams" }, { status: 429 });
+  }
+
   const encoder = new TextEncoder();
-
+  let cleanup: () => void = () => {};
   const stream = new ReadableStream({
     start(controller) {
-      const send = (data: unknown) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      let closed = false;
+      function enqueue(text: string) {
+        if (closed) return;
+        if ((controller.desiredSize ?? 0) <= 0) {
+          cleanup();
+          controller.close();
+          return;
+        }
+        controller.enqueue(encoder.encode(text));
+      }
+      const unsubscribe = subscribeToGatewayEvents((event) => enqueue(`data: ${JSON.stringify(event)}\n\n`));
+      const timer = setInterval(() => enqueue(": ping\n\n"), 25_000);
+      const abort = () => {
+        cleanup();
+        controller.close();
+      };
+      cleanup = () => {
+        if (closed) return;
+        closed = true;
+        unsubscribe();
+        clearInterval(timer);
+        req.signal.removeEventListener("abort", abort);
       };
 
-      send({ type: "connected" });
-
-      const unsubscribe = subscribeToGatewayEvents((event) => {
-        try {
-          send(event);
-        } catch {
-          // controller already closed
-        }
-      });
-
-      const keepAlive = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(`: ping\n\n`));
-        } catch {
-          clearInterval(keepAlive);
-        }
-      }, 25_000);
-
-      req.signal.addEventListener("abort", () => {
-        clearInterval(keepAlive);
-        unsubscribe();
-        try {
-          controller.close();
-        } catch {
-          // already closed
-        }
-      });
+      req.signal.addEventListener("abort", abort, { once: true });
+      if (req.signal.aborted) abort();
+      else enqueue('data: {"type":"connected"}\n\n');
     },
-  });
+    cancel() {
+      cleanup();
+    },
+  }, { highWaterMark: 32 });
 
   return new Response(stream, {
-    headers: {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-    },
+    headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no" },
   });
 }
+
+export const GET = withAdmin(get);

@@ -1,3 +1,4 @@
+import { withAdmin } from "@/server/http/admin";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
@@ -12,7 +13,7 @@ type TailscaleStatus = {
 
 async function getStatus(): Promise<TailscaleStatus> {
   try {
-    const { stdout } = await execFileAsync("tailscale", ["status", "--json"]);
+    const { stdout } = await execFileAsync("tailscale", ["status", "--json"], { timeout: 1500, maxBuffer: 256 * 1024 });
     const parsed = JSON.parse(stdout) as {
       Self?: { DNSName?: string; TailscaleIPs?: string[]; Online?: boolean };
     };
@@ -28,15 +29,15 @@ async function getStatus(): Promise<TailscaleStatus> {
   }
 }
 
-export async function GET() {
-  return NextResponse.json(await getStatus());
+function clientOrigin(): string | undefined {
+  const value = process.env.MCP_GATEWAY_PUBLIC_MCP_ORIGIN ?? process.env.MCP_GATEWAY_OAUTH_RESOURCE_ORIGIN;
+  try {
+    const url = new URL(value ?? "");
+    if (!url.username && !url.password && url.pathname === "/" && !url.search && !url.hash &&
+        ["https:", "http:"].includes(url.protocol)) return url.origin;
+  } catch {
+    // The browser falls back to its current origin for a local installation.
+  }
 }
 
-export async function POST() {
-  try {
-    await execFileAsync("tailscale", ["up"]);
-  } catch {
-    // fall through — report current status either way
-  }
-  return NextResponse.json(await getStatus());
-}
+export const GET = withAdmin(async () => NextResponse.json({ ...await getStatus(), clientOrigin: clientOrigin() }));

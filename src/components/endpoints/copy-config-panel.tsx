@@ -19,6 +19,10 @@ import {
 
 const CONFIG_SERVER_NAME = "mcp-gateway";
 
+function shellQuote(value: string): string {
+  return "'" + value.replaceAll("'", "'\\''") + "'";
+}
+
 export function CopyConfigPanel({
   endpointId,
   slug,
@@ -26,6 +30,7 @@ export function CopyConfigPanel({
   revealedToken,
   onTokenRegenerated,
   clientIdHeader,
+  authMode = "bearer",
 }: {
   endpointId: string;
   slug: string;
@@ -33,11 +38,12 @@ export function CopyConfigPanel({
   revealedToken?: string | null;
   onTokenRegenerated: (token: string) => void;
   clientIdHeader?: string;
+  authMode?: "bearer" | "oauth";
 }) {
   const [origin, setOrigin] = useState("http://localhost:3000");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
-  const [tailscale, setTailscale] = useState<{ connected: boolean; hostname?: string } | null>(null);
+  const [tailscale, setTailscale] = useState<{ connected: boolean; hostname?: string; clientOrigin?: string } | null>(null);
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -48,9 +54,9 @@ export function CopyConfigPanel({
   }, []);
 
   const tokenDisplay = revealedToken ?? `${tokenPrefix}${"•".repeat(32)}`;
-  const url = `${origin}/api/mcp/${slug}`;
+  const url = `${tailscale?.clientOrigin ?? origin}/api/mcp/${slug}`;
 
-  const headers: Record<string, string> = { Authorization: `Bearer ${tokenDisplay}` };
+  const headers: Record<string, string> = authMode === "bearer" ? { Authorization: `Bearer ${tokenDisplay}` } : {};
   if (clientIdHeader) headers["X-MCP-Client-Id"] = clientIdHeader;
 
   const jsonConfig = JSON.stringify(
@@ -68,15 +74,14 @@ export function CopyConfigPanel({
   );
 
   const cliConfig = [
-    `claude mcp add --transport http ${CONFIG_SERVER_NAME} ${url}`,
-    `--header "Authorization: Bearer ${tokenDisplay}"`,
-    clientIdHeader ? `--header "X-MCP-Client-Id: ${clientIdHeader}"` : null,
+    `claude mcp add --transport http ${CONFIG_SERVER_NAME} ${shellQuote(url)}`,
+    ...Object.entries(headers).map(([key, value]) => `--header ${shellQuote(key + ": " + value)}`),
   ]
     .filter(Boolean)
     .join(" ");
 
   const tailscaleUrl =
-    tailscale?.connected && tailscale.hostname
+    authMode === "bearer" && !tailscale?.clientOrigin && tailscale?.connected && tailscale.hostname
       ? (() => {
           try {
             const u = new URL(url);
@@ -114,7 +119,8 @@ export function CopyConfigPanel({
 
   return (
     <div className="space-y-3">
-      {!revealedToken && (
+      {authMode === "oauth" && <p className="text-xs text-muted-foreground">This endpoint signs in through its configured OAuth issuer.</p>}
+      {authMode === "bearer" && !revealedToken && (
         <p className="text-xs text-muted-foreground">
           The full token is only ever shown once. This config uses a masked placeholder — regenerate
           the token to get a fresh, copyable value.
@@ -161,7 +167,7 @@ export function CopyConfigPanel({
         Regenerate token
       </Button>
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      {authMode === "bearer" && <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Regenerate token?</AlertDialogTitle>
@@ -175,7 +181,7 @@ export function CopyConfigPanel({
             <AlertDialogAction onClick={regenerate}>Regenerate</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog>}
     </div>
   );
 }

@@ -137,9 +137,11 @@ export const auditLog = sqliteTable("audit_log", {
       "tools/list",
       "tools/call",
       "resources/list",
+      "resources/templates/list",
       "resources/read",
       "prompts/list",
       "prompts/get",
+      "admin/change",
       "connect",
       "disconnect",
       "elicitation/create",
@@ -182,3 +184,24 @@ export type BackendServerTool = typeof backendServerTools.$inferSelect;
 export type NewBackendServerTool = typeof backendServerTools.$inferInsert;
 export type EndpointClient = typeof endpointClients.$inferSelect;
 export type NewEndpointClient = typeof endpointClients.$inferInsert;
+
+export const endpointToolRules = sqliteTable("endpoint_tool_rules", {
+  endpointId: text("endpoint_id").notNull()
+    .references(() => clientEndpoints.id, { onDelete: "cascade" }),
+  backendServerId: text("backend_server_id").notNull()
+    .references(() => backendServers.id, { onDelete: "cascade" }),
+  toolName: text("tool_name").notNull(),
+  access: text("access", { enum: ["allow", "deny"] }).notNull(),
+}, (table) => [
+  uniqueIndex("endpoint_tool_rules_unique_idx").on(table.endpointId, table.backendServerId, table.toolName),
+]);
+
+export const endpointToolPolicies = sqliteTable("endpoint_tool_policies", {
+  endpointId: text("endpoint_id").notNull()
+    .references(() => clientEndpoints.id, { onDelete: "cascade" }),
+  backendServerId: text("backend_server_id").notNull()
+    .references(() => backendServers.id, { onDelete: "cascade" }),
+  mode: text("mode", { enum: ["inherit", "allowlist"] }).notNull(),
+}, (table) => [
+  uniqueIndex("endpoint_tool_policies_unique_idx").on(table.endpointId, table.backendServerId),
+]);

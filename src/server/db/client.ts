@@ -17,7 +17,9 @@ function resolveDbPath() {
 
 function createDb() {
   const dbPath = resolveDbPath();
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+  fs.closeSync(fs.openSync(dbPath, "a", 0o600));
+  fs.chmodSync(dbPath, 0o600);
 
   // better-sqlite3 resolves its native binding lazily, right here at
   // construction time (confirmed empirically - requiring the package alone
@@ -41,6 +43,7 @@ function createDb() {
     process.exit(1);
   }
 
+  sqlite.pragma("busy_timeout = 5000");
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
 
@@ -51,8 +54,6 @@ declare global {
   var __gatewayDb: ReturnType<typeof createDb> | undefined;
 }
 
-export const db = globalThis.__gatewayDb ?? createDb();
-
-if (process.env.NODE_ENV !== "production") {
-  globalThis.__gatewayDb = db;
+export function getDb(): ReturnType<typeof createDb> {
+  return (globalThis.__gatewayDb ??= createDb());
 }

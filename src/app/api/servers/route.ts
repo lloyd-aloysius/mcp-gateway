@@ -1,26 +1,37 @@
+import { validateBackendUrl } from "@/server/gateway/egress";
+import { publicBackend } from "@/server/gateway/backend-secrets";
+import { readJsonBody } from "@/server/http/json-body";
+import { withAdmin } from "@/server/http/admin";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { db } from "@/server/db/client";
+import { getDb } from "@/server/db/client";
 import { backendServers } from "@/server/db/schema";
 import { backendServerInputSchema } from "@/lib/validation";
 import { addOrReplaceConnection, getConnection } from "@/server/gateway/backend-registry";
 
-export async function GET() {
-  const rows = await db.select().from(backendServers);
-  return NextResponse.json(rows.map((row) => ({ ...row, pid: getConnection(row.id)?.pid ?? null })));
+async function get() {
+  const rows = await getDb().select().from(backendServers);
+  return NextResponse.json(rows.map((row) => ({ ...publicBackend(row), pid: getConnection(row.id)?.pid ?? null })));
 }
 
-export async function POST(req: Request) {
-  const body = await req.json();
+async function post(req: Request) {
+  const body = await readJsonBody(req);
   const parsed = backendServerInputSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const input = parsed.data;
+  if (input.connectionType !== "stdio") {
+    try {
+      validateBackendUrl(input.url);
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid backend URL" }, { status: 400 });
+    }
+  }
 
   let row;
   try {
-    [row] = await db
+    [row] = await getDb()
       .insert(backendServers)
       .values({
         id: randomUUID(),
@@ -46,5 +57,8 @@ export async function POST(req: Request) {
 
   void addOrReplaceConnection(row);
 
-  return NextResponse.json(row, { status: 201 });
+  return NextResponse.json(publicBackend(row), { status: 201 });
 }
+
+export const GET = withAdmin(get);
+export const POST = withAdmin(post);

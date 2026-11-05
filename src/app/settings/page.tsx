@@ -1,9 +1,10 @@
 "use client";
 
+import { gatewayVersion } from "@/lib/gateway-version";
 import { useEffect, useState } from "react";
-import { AlertTriangle, Moon, Sun, Monitor, RefreshCw } from "lucide-react";
+import { AlertTriangle, Moon, Sun, Monitor } from "lucide-react";
+import { GatewayOperations } from "@/components/layout/gateway-operations";
 import { useTheme } from "next-themes";
-import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -24,8 +25,7 @@ export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const [origin, setOrigin] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [connecting, setConnecting] = useState(false);
-  const { data: tailscale, refetch: refetchTailscale } = usePollingFetch<TailscaleStatus>(
+  const { data: tailscale } = usePollingFetch<TailscaleStatus>(
     "/api/settings/tailscale",
     15000
   );
@@ -34,19 +34,6 @@ export default function SettingsPage() {
     setMounted(true);
     setOrigin(window.location.origin);
   }, []);
-
-  async function connectTailscale() {
-    setConnecting(true);
-    try {
-      const res = await fetch("/api/settings/tailscale", { method: "POST" });
-      if (!res.ok) throw new Error();
-      await refetchTailscale();
-    } catch {
-      toast.error("Failed to bring up Tailscale — is it installed?");
-    } finally {
-      setConnecting(false);
-    }
-  }
 
   const hostname = origin ? new URL(origin).hostname : "";
   const isLocalOnly = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -64,10 +51,8 @@ export default function SettingsPage() {
           <AlertTriangle className="size-4" />
           <AlertTitle>This dashboard is reachable beyond localhost</AlertTitle>
           <AlertDescription>
-            There is no login on this dashboard by design — it&apos;s meant for personal, single-user
-            use. Anyone who can reach <code className="font-mono">{origin}</code> can manage servers,
-            endpoints, and tokens. Keep this behind a firewall, VPN, or SSH tunnel unless you add your
-            own access control in front of it.
+            Use HTTPS and restrict this dashboard to administrators. Give MCP clients a separate
+            hostname that forwards only their MCP routes.
           </AlertDescription>
         </Alert>
       )}
@@ -128,14 +113,13 @@ export default function SettingsPage() {
                 Not connected. Requires the{" "}
                 <code className="font-mono text-xs">tailscale</code> CLI installed on this host.
               </p>
-              <Button variant="outline" size="sm" onClick={connectTailscale} disabled={connecting}>
-                <RefreshCw className={connecting ? "size-3.5 animate-spin" : "size-3.5"} />
-                Connect Tailscale
-              </Button>
+              <p className="text-xs text-muted-foreground">Configure Tailscale on the service host.</p>
             </>
           )}
         </CardContent>
       </Card>
+
+      <GatewayOperations />
 
       <Card>
         <CardHeader>
@@ -164,7 +148,7 @@ export default function SettingsPage() {
           <CardTitle>About</CardTitle>
         </CardHeader>
         <CardContent className="space-y-1 text-sm text-muted-foreground">
-          <p>MCP Gateway v0.1.0</p>
+          <p>MCP Gateway v{gatewayVersion}</p>
           <p>Single-user, self-hosted MCP aggregation gateway.</p>
         </CardContent>
       </Card>

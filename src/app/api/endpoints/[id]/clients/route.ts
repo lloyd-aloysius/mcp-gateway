@@ -1,15 +1,17 @@
+import { readJsonBody } from "@/server/http/json-body";
+import { withAdmin } from "@/server/http/admin";
 import { randomUUID } from "node:crypto";
 import { eq, desc } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/server/db/client";
+import { getDb } from "@/server/db/client";
 import { endpointClients } from "@/server/db/schema";
 import { createEndpointClientSchema } from "@/lib/validation";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, { params }: Params) {
+async function get(_req: Request, { params }: Params) {
   const { id } = await params;
-  const rows = await db
+  const rows = await getDb()
     .select()
     .from(endpointClients)
     .where(eq(endpointClients.endpointId, id))
@@ -17,9 +19,9 @@ export async function GET(_req: Request, { params }: Params) {
   return NextResponse.json(rows);
 }
 
-export async function POST(req: Request, { params }: Params) {
+async function post(req: Request, { params }: Params) {
   const { id } = await params;
-  const body = await req.json();
+  const body = await readJsonBody(req);
   const parsed = createEndpointClientSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -27,7 +29,7 @@ export async function POST(req: Request, { params }: Params) {
 
   let row;
   try {
-    [row] = await db
+    [row] = await getDb()
       .insert(endpointClients)
       .values({ id: randomUUID(), endpointId: id, clientId: parsed.data.clientId })
       .returning();
@@ -40,3 +42,6 @@ export async function POST(req: Request, { params }: Params) {
 
   return NextResponse.json(row, { status: 201 });
 }
+
+export const GET = withAdmin(get);
+export const POST = withAdmin(post);

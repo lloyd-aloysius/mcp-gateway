@@ -52,6 +52,10 @@ type BackendServer = {
 
 type ToolRow = { name: string; description: string | null; enabled: boolean };
 
+function secretChanges(values: Record<string, string>) {
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === "" ? null : value]));
+}
+
 export function ServerDetailClient({ id }: { id: string }) {
   const router = useRouter();
   const [server, setServer] = useState<BackendServer | null>(null);
@@ -227,9 +231,9 @@ export function ServerDetailClient({ id }: { id: string }) {
                 <KeyValueListEditor
                   value={env}
                   onChange={setEnv}
-                  onCommit={(v) => saveSettings({ env: v })}
+                  onCommit={(v) => saveSettings({ env: secretChanges(v) })}
                   keyPlaceholder="API_KEY"
-                  valuePlaceholder="value"
+                  valuePlaceholder="Leave blank to keep saved value"
                   addLabel="Add variable"
                   emptyLabel="No environment variables set"
                 />
@@ -251,7 +255,7 @@ export function ServerDetailClient({ id }: { id: string }) {
                 <KeyValueListEditor
                   value={headers}
                   onChange={setHeaders}
-                  onCommit={(v) => saveSettings({ headers: v })}
+                  onCommit={(v) => saveSettings({ headers: secretChanges(v) })}
                   keyPlaceholder="Authorization"
                   valuePlaceholder="Bearer ..."
                   addLabel="Add header"

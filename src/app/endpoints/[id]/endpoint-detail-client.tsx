@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CopyConfigPanel } from "@/components/endpoints/copy-config-panel";
+import { ToolPolicyPanel } from "@/components/endpoints/tool-policy-panel";
 import { RuleToggleTable } from "@/components/endpoints/rule-toggle-table";
 
 type Endpoint = {
@@ -51,6 +52,7 @@ type Endpoint = {
   name: string;
   slug: string;
   tokenPrefix: string;
+  authMode?: "bearer" | "oauth";
   defaultPolicy: "allow_all" | "deny_all";
   enabled: boolean;
 };
@@ -241,6 +243,8 @@ export function EndpointDetailClient({ id }: { id: string }) {
         </CardContent>
       </Card>
 
+      <ToolPolicyPanel endpointId={id} servers={servers} />
+
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
           <div>
@@ -290,6 +294,7 @@ export function EndpointDetailClient({ id }: { id: string }) {
                         endpointId={id}
                         slug={endpoint.slug}
                         tokenPrefix={endpoint.tokenPrefix}
+                        authMode={endpoint.authMode}
                         revealedToken={revealedToken}
                         onTokenRegenerated={setRevealedToken}
                         clientIdHeader={client.clientId}
@@ -313,6 +318,7 @@ export function EndpointDetailClient({ id }: { id: string }) {
             endpointId={id}
             slug={endpoint.slug}
             tokenPrefix={endpoint.tokenPrefix}
+            authMode={endpoint.authMode}
             revealedToken={revealedToken}
             onTokenRegenerated={setRevealedToken}
           />

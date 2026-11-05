@@ -29,9 +29,9 @@ export const backendServerUpdateSchema = z.object({
   description: z.string().optional(),
   command: z.string().min(1).optional(),
   args: z.array(z.string()).optional(),
-  env: z.record(z.string(), z.string()).optional(),
+  env: z.record(z.string(), z.string().nullable()).optional(),
   url: z.string().url().optional(),
-  headers: z.record(z.string(), z.string()).optional(),
+  headers: z.record(z.string(), z.string().nullable()).optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -44,6 +44,14 @@ export const clientEndpointInputSchema = z.object({
   defaultPolicy: z.enum(["allow_all", "deny_all"]).default("deny_all"),
   enabled: z.boolean().default(true),
 });
+
+export const clientEndpointUpdateSchema = clientEndpointInputSchema
+  .pick({ name: true, slug: true })
+  .partial()
+  .extend({
+    defaultPolicy: z.enum(["allow_all", "deny_all"]).optional(),
+    enabled: z.boolean().optional(),
+  });
 
 export type ClientEndpointInput = z.infer<typeof clientEndpointInputSchema>;
 

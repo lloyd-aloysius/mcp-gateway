@@ -5,25 +5,99 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
-          cache: "npm"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run test:unit
+      - run: npm run build
+      - name: Pack and inventory the release artifact
+        run: |
+          mkdir -p release
+          npm pack --ignore-scripts --json --pack-destination release > release/pack.json
+          node scripts/check-package.mjs release/pack.json > release/gateway.cdx.json
+          (cd release && sha256sum *.tgz > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gateway-npm-package
+          path: release/
+          if-no-files-found: error
 
-      - run: npm ci
+  npm-smoke:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: "22"
+          - os: ubuntu-24.04-arm
+            node: "22"
+          - os: macos-14
+            node: "24"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: gateway-npm-package
+          path: release
+      - run: npm ci --ignore-scripts
+      - name: Smoke-test the exact tarball
+        shell: bash
+        run: |
+          (cd release && shasum -a 256 -c SHA256SUMS)
+          npm install --prefix "$RUNNER_TEMP/gateway-package" --ignore-scripts --no-audit --no-fund "$PWD"/release/*.tgz
+          GATEWAY_TEST_CLI="$RUNNER_TEMP/gateway-package/node_modules/@lloyd-aloysius/mcp-gateway/bin/cli.mjs" npm run test:security
 
-      - name: Type check
-        run: npx tsc --noEmit
+  docker-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - run: npm ci --ignore-scripts
+      - run: docker build -t mcp-gateway-test .
+      - name: Test container as its default service user
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,mode=1777,size=64m \
+            -v "$PWD/tests:/fixture/tests:ro" -v "$PWD/node_modules:/fixture/node_modules:ro" \
+            -e GATEWAY_TEST_SERVER_ENTRY=/app/server.js mcp-gateway-test \
+            node --test /fixture/tests/gateway-security.test.mjs
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        run: npm run build
+      - name: Inventory the tested image
+        run: |
+          docker run --rm --network none --read-only \
+            -v "$PWD/scripts:/fixture:ro" mcp-gateway-test node /fixture/image-sbom.mjs > gateway-image.cdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gateway-image-inventory-${{ matrix.os }}
+          path: gateway-image.cdx.json
+          if-no-files-found: error

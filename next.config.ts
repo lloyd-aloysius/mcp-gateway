@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
   // a trimmed node_modules, instead of requiring the full project + devDeps
   // to be present at runtime.
   output: "standalone",
+  images: { unoptimized: true },
+  outputFileTracingExcludes: { "/*": ["./data/**", "./.env", "./.env.*"] },
   // better-sqlite3 ships a native .node binding; keep it out of the webpack
   // bundle so it's `require()`d directly from node_modules (and correctly
   // copied as-is into the standalone output) instead of being bundled.

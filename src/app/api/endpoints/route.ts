@@ -1,6 +1,8 @@
+import { readJsonBody } from "@/server/http/json-body";
+import { withAdmin } from "@/server/http/admin";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { db } from "@/server/db/client";
+import { getDb } from "@/server/db/client";
 import { clientEndpoints } from "@/server/db/schema";
 import { clientEndpointInputSchema } from "@/lib/validation";
 import { generateToken } from "@/server/tokens";
@@ -8,16 +10,16 @@ import { emitGatewayEvent } from "@/server/events/bus";
 import { toPublicEndpoint } from "@/server/gateway/serialize";
 import { getActiveSessionCountByEndpoint } from "@/server/gateway/endpoint-runtime";
 
-export async function GET() {
-  const rows = await db.select().from(clientEndpoints);
+async function get() {
+  const rows = await getDb().select().from(clientEndpoints);
   const activeSessions = getActiveSessionCountByEndpoint();
   return NextResponse.json(
     rows.map((row) => ({ ...toPublicEndpoint(row), activeSessions: activeSessions.get(row.id) ?? 0 }))
   );
 }
 
-export async function POST(req: Request) {
-  const body = await req.json();
+async function post(req: Request) {
+  const body = await readJsonBody(req);
   const parsed = clientEndpointInputSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -27,7 +29,7 @@ export async function POST(req: Request) {
 
   let row;
   try {
-    [row] = await db
+    [row] = await getDb()
       .insert(clientEndpoints)
       .values({
         id: randomUUID(),
@@ -50,3 +52,6 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ...toPublicEndpoint(row), token }, { status: 201 });
 }
+
+export const GET = withAdmin(get);
+export const POST = withAdmin(post);

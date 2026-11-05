@@ -31,12 +31,9 @@ declare global {
   var __gatewayEventBus: EventEmitter | undefined;
 }
 
-const bus = globalThis.__gatewayEventBus ?? new EventEmitter();
+const bus = (globalThis.__gatewayEventBus ??= new EventEmitter());
 bus.setMaxListeners(100);
 
-if (process.env.NODE_ENV !== "production") {
-  globalThis.__gatewayEventBus = bus;
-}
 
 export function emitGatewayEvent(event: GatewayEvent) {
   bus.emit("event", event);
@@ -47,4 +44,8 @@ export function subscribeToGatewayEvents(
 ): () => void {
   bus.on("event", listener);
   return () => bus.off("event", listener);
+}
+
+export function gatewayEventSubscribers(): number {
+  return bus.listenerCount("event");
 }

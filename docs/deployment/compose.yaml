@@ -1,0 +1,23 @@
+services:
+  gateway:
+    build:
+      context: ../..
+    env_file: ../../.env
+    environment:
+      DATABASE_PATH: /data/gateway.db
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - gateway-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    restart: unless-stopped
+
+volumes:
+  gateway-data:

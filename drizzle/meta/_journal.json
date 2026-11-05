@@ -15,6 +15,20 @@
       "when": 1784648744303,
       "tag": "0001_loud_eternals",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793846871633,
+      "tag": "0002_endpoint_tool_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793847727973,
+      "tag": "0003_endpoint_tool_policy_mode",
+      "breakpoints": true
     }
   ]
 }
