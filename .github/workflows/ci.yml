@@ -25,6 +25,8 @@ jobs:
       - run: npm run lint
       - run: npm run test:unit
       - run: npm run build
+      # npm 10 can run prepare during pack even with --ignore-scripts.
+      - run: npm install -g npm@11.19.0
       - name: Pack and inventory the release artifact
         run: |
           mkdir -p release
