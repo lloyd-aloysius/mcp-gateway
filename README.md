@@ -4,7 +4,7 @@ A self-hosted dashboard for aggregating multiple [Model Context Protocol](https:
 
 Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL instead of configuring each backend server individually. Namespaced tools (`server__tool`) from every connected backend show up as one unified toolset, with fine-grained control over which client can use which server.
 
-![Live gateway demo with ten backends, twelve named clients, moving request particles and a populated activity feed](docs/screenshots/overview-live.gif)
+![Live gateway demo with ten backends, thirteen named clients, moving request particles and a populated activity feed](docs/screenshots/overview-live.gif)
 
 ## Features
 
