@@ -1,0 +1,1 @@
+ALTER TABLE `endpoint_clients` ADD `icon` text DEFAULT 'auto' NOT NULL;

@@ -82,6 +82,7 @@ export const endpointClients = sqliteTable("endpoint_clients", {
     .references(() => clientEndpoints.id, { onDelete: "cascade" }),
   clientId: text("client_id").notNull(),
   label: text("label"),
+  icon: text("icon").notNull().default("auto"),
   firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" })
     .notNull()
     .default(sql`(unixepoch('subsec') * 1000)`),

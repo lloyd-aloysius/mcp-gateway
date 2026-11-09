@@ -8,6 +8,14 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 
 ## Features
 
+### New in 0.6.0
+
+- Create, edit and remove client profiles from **Settings → Clients** or the endpoint's client list.
+- Pick Automatic detection, a popular product logo (including OpenClaw and Hermes), or one of five generic icons. Manual choices survive renaming, calls and restarts.
+- Removing a profile keeps audit history, endpoint credentials and access rules. A later call discovers the client again.
+- Existing client IDs, names and timestamps are preserved; the additive logo migration defaults them to Automatic.
+
+
 ### Backend servers
 
 - **Any transport** — connect stdio (local command), Streamable HTTP, or SSE MCP servers from the dashboard, with live connection status and auto-reconnect for remote servers.
@@ -22,7 +30,7 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 - **Unique URL + token per client** — create as many endpoints as you need; each gets its own bearer token, stored as a SHA-256 hash and shown in full exactly once.
 - **Two default policies** — allow-everything-then-restrict, or deny-everything-then-grant, set per endpoint.
 - **Per-server override rules** — a 3-state table (Allow / Deny / Inherit default) per backend server, evaluated fresh on *every* call rather than cached into a session's tool list — a rule change takes effect on the client's next call, no gateway restart needed.
-- **Named client identities** — edit display names in **Settings → Clients**. Codex, Claude Code and Antigravity get recognizable product icons automatically; other names use a matching generic icon. Names are scoped to the endpoint and never change connection IDs or tokens.
+- **Named client identities** — edit display names in **Settings → Clients**. Choose Automatic, a product logo (including OpenClaw, Hermes, Codex, Claude, Cursor, Windsurf and Copilot), or a themed desktop, terminal, bot, browser or service icon. Manual logos stay selected when you rename a client. Names are scoped to the endpoint and never change connection IDs or tokens.
 - **Connected-client tracking** — endpoints identify distinct callers via an `X-MCP-Client-Id` header (or a random fallback if a client doesn't send one), so one endpoint shared across, say, both Claude Desktop and Claude Code shows each as a separate tracked client with its own last-seen time.
 - **Ready-to-copy client config** — a config panel with `mcp.json` / Claude CLI / Tailscale tabs; the server entry name shown to clients is always the fixed `mcp-gateway`, so renaming an endpoint in the dashboard never breaks an already-configured client.
 
@@ -45,7 +53,7 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 
 ## Screenshots
 
-Screenshots and the animated overview use synthetic demo data and local fixture backends; they contain no personal gateway configuration or credentials. The animation captures real MCP calls and the minimum-duration particle flow, alongside actual call durations in Live activity.
+Screenshots and the animated overview use synthetic demo data and local fixture backends; they contain no personal gateway configuration or credentials. The dark-mode animation captures real MCP calls sequentially, with only the routes carrying requests lighting up, alongside actual call durations in Live activity.
 
 <details>
 <summary><strong>Client identities and live activity</strong> — themed product icons, compact cards and a denser feed</summary>
@@ -278,3 +286,13 @@ follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 Client product marks and asset attribution are documented in [Client icon artwork](docs/client-icons.md).
 
 MIT — see [LICENSE](LICENSE).
+
+### Client profile management
+
+Use **Settings → Clients** or an endpoint's **Connected clients** list to create, edit or remove profiles. Editing changes the display name and logo; the connection ID, endpoint token and permissions stay unchanged. The logo picker includes Automatic name detection and explicit product/generic choices, with a live preview.
+
+Removing a profile keeps its audit history, endpoint credentials and access rules. If the same client calls again, it is discovered as a fresh profile with Automatic icon selection. Deleting a profile does not revoke access; manage access on the endpoint.
+
+The client-logo migration adds an `icon` column defaulting to `auto`, preserving names and IDs for existing clients.
+
+![Client profile editor with automatic and explicit product/generic logo choices](docs/screenshots/client-editor.png)

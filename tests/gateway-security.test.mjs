@@ -126,7 +126,7 @@ test("built gateway security and startup", { timeout: 30_000 }, async (t) => {
     });
 
   const forwarded = [];
-  async function connect(token, slug = endpoint.slug, name = "security-fixture") {
+  async function connect(token, slug = endpoint.slug, name = "security-fixture", clientId) {
     const client = new Client({ name, version: "1" }, {
       capabilities: { elicitation: { form: {} }, sampling: {} },
     });
@@ -140,7 +140,7 @@ test("built gateway security and startup", { timeout: 30_000 }, async (t) => {
       return { role: "assistant", model: "fixture", content: { type: "text", text: name } };
     });
     const transport = new StreamableHTTPClientTransport(new URL(base + "/api/mcp/" + slug), {
-      requestInit: { headers: { authorization: "Bearer " + token } },
+      requestInit: { headers: { authorization: "Bearer " + token, ...(clientId ? { "X-MCP-Client-Id": clientId } : {}) } },
     });
     await client.connect(transport);
     return { client, sessionId: transport.sessionId };
@@ -188,6 +188,52 @@ test("built gateway security and startup", { timeout: 30_000 }, async (t) => {
     assert.equal((await json("/api/endpoints/clients", "PATCH", { id: first.id, label: " " })).label, null);
   });
 
+  await t.test("client logos persist and removing a profile preserves access/history and rediscovers on the next call", async () => {
+    const otherEndpoint = await json("/api/endpoints", "POST", { name: "Profile isolation", slug: "profile-isolation", defaultPolicy: "allow_all" });
+    const duplicate = await json("/api/endpoints/" + otherEndpoint.id + "/clients", "POST", { clientId: "profile-fixture", label: "Other profile", icon: "bot" });
+    const profile = await json(adminPath + "/clients", "POST", { clientId: "profile-fixture", label: "  My assistant  ", icon: "hermes" });
+    assert.equal(profile.label, "My assistant");
+    assert.equal(profile.icon, "hermes");
+    assert.equal((await request("/api/endpoints/missing/clients", "POST", { clientId: "x" })).status, 404);
+    assert.equal((await request(adminPath + "/clients", "POST", { clientId: "bad\nheader" })).status, 400);
+    assert.equal((await request(adminPath + "/clients", "POST", { clientId: "bad-icon", icon: "https://untrusted.invalid/icon.svg" })).status, 400);
+    assert.equal((await request("/api/endpoints/clients", "PATCH", { id: profile.id, icon: "not-a-preset" })).status, 400);
+    assert.equal((await request("/api/endpoints/clients", "PATCH", { id: profile.id })).status, 400);
+    const renamed = await json("/api/endpoints/clients", "PATCH", { id: profile.id, label: "Codex custom" });
+    assert.equal(renamed.icon, "hermes");
+    assert.equal(renamed.clientId, "profile-fixture");
+    await stopGateway(); startGateway(); await waitForGateway();
+    assert.equal((await json("/api/endpoints/clients")).find((c) => c.id === profile.id).icon, "hermes");
+    const { client } = await connect(endpoint.token, endpoint.slug, "profile-fixture", "profile-fixture");
+    try {
+      const result = await client.callTool({ name: "gateway-tools__ping", arguments: {} });
+      assert.ok(!result.isError);
+      assert.equal((await json("/api/endpoints/clients")).find((c) => c.id === profile.id).icon, "hermes");
+      const beforeAudit = await json("/api/audit?clientId=profile-fixture&endpointId=" + endpoint.id);
+      assert.ok(beforeAudit.rows.length > 0);
+      const beforeEndpoint = await json(adminPath);
+      for (const headers of [{ authorization: "" }, { authorization: "Bearer " + endpoint.token }]) {
+        assert.equal((await request("/api/endpoints/clients", "DELETE", { id: profile.id }, headers)).status, 401);
+      }
+      assert.equal((await request("/api/endpoints/clients", "DELETE", { id: profile.id }, { origin: "https://foreign.invalid" })).status, 403);
+      assert.equal((await request("/api/endpoints/clients", "DELETE", { id: profile.id, clientId: "other" })).status, 400);
+      assert.equal((await request("/api/endpoints/clients", "DELETE", { id: "missing" })).status, 404);
+      await json("/api/endpoints/clients", "DELETE", { id: profile.id });
+      const remaining = await json("/api/endpoints/clients");
+      assert.ok(!remaining.some((c) => c.id === profile.id));
+      assert.equal(remaining.find((c) => c.id === duplicate.id).icon, "bot");
+      const afterAudit = await json("/api/audit?clientId=profile-fixture&endpointId=" + endpoint.id);
+      assert.deepEqual(afterAudit.rows, beforeAudit.rows);
+      const afterEndpoint = await json(adminPath);
+      for (const field of ["id", "slug", "tokenPrefix", "defaultPolicy", "enabled"]) assert.equal(afterEndpoint[field], beforeEndpoint[field], field);
+      assert.ok(!(await client.callTool({ name: "gateway-tools__ping", arguments: {} })).isError);
+      const rediscovered = (await json("/api/endpoints/clients")).find((c) => c.endpointId === endpoint.id && c.clientId === "profile-fixture");
+      assert.ok(rediscovered && rediscovered.id !== profile.id);
+      assert.equal(rediscovered.icon, "auto");
+      assert.equal(rediscovered.label, null);
+    } finally { await client.close(); }
+  });
+
   await t.test("browser sign-in issues a revocable session and protects mutations from cross-origin requests", async () => {
     assert.equal((await request("/login", "GET", undefined, { authorization: "" })).status, 200);
     const login = (password, origin = base) => request("/api/admin/session", "POST", { password }, {
@@ -204,6 +250,7 @@ test("built gateway security and startup", { timeout: 30_000 }, async (t) => {
     assert.equal((await request("/", "GET", undefined, session)).status, 200);
     assert.equal((await request("/api/servers", "GET", undefined, session)).status, 200);
     assert.equal((await request("/api/endpoints", "POST", {}, session)).status, 403);
+    assert.equal((await request("/api/endpoints/clients", "DELETE", { id: "missing" }, session)).status, 403);
     assert.equal((await request("/api/admin/session", "DELETE", undefined, {
       ...session, origin: "https://foreign.invalid",
     })).status, 403);
@@ -509,7 +556,7 @@ test("built gateway security and startup", { timeout: 30_000 }, async (t) => {
       "SELECT id, name, slug, token_hash, token_prefix, default_policy, enabled FROM client_endpoints WHERE id = 'legacy-endpoint'",
       "SELECT * FROM endpoint_server_rules WHERE endpoint_id = 'legacy-endpoint' ORDER BY id",
       "SELECT * FROM backend_server_tools WHERE backend_server_id = 'legacy-stdio'",
-      "SELECT * FROM endpoint_clients WHERE id = 'legacy-client'",
+      "SELECT id, endpoint_id, client_id, label, first_seen_at, last_seen_at FROM endpoint_clients WHERE id = 'legacy-client'",
       "SELECT * FROM app_settings WHERE key = 'legacy-custom-setting'",
       "SELECT * FROM audit_log WHERE item_name = 'legacy-audit-record'",
     ];
@@ -555,6 +602,7 @@ test("built gateway security and startup", { timeout: 30_000 }, async (t) => {
     const upgraded = new Database(upgradedPath, { readonly: true });
     try {
       assert.deepEqual(state(upgraded), before);
+      assert.equal(upgraded.prepare("SELECT icon FROM endpoint_clients WHERE id = 'legacy-client'").get().icon, "auto");
       assert.deepEqual(upgraded.pragma("foreign_key_check"), []);
     } finally {
       upgraded.close();

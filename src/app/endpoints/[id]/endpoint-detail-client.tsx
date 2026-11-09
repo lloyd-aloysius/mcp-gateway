@@ -18,14 +18,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ClientActions, ClientEditor } from "@/components/clients/client-editor";
 import {
   Select,
   SelectContent,
@@ -60,7 +53,7 @@ type Endpoint = {
 
 type BackendServerRow = { id: string; key: string; name: string; status: string };
 type Rule = { backendServerId: string; access: "allow" | "deny" };
-type EndpointClientRow = { id: string; clientId: string; label: string | null; firstSeenAt: string; lastSeenAt: string };
+type EndpointClientRow = { id: string; endpointId: string; clientId: string; label: string | null; icon?: string; firstSeenAt: string; lastSeenAt: string };
 
 export function EndpointDetailClient({ id }: { id: string }) {
   const router = useRouter();
@@ -75,8 +68,6 @@ export function EndpointDetailClient({ id }: { id: string }) {
   const [slug, setSlug] = useState("");
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
   const [createClientOpen, setCreateClientOpen] = useState(false);
-  const [newClientId, setNewClientId] = useState("");
-  const [creatingClient, setCreatingClient] = useState(false);
 
   async function loadAll() {
     const [epRes, serversRes, rulesRes, clientsRes] = await Promise.all([
@@ -116,31 +107,6 @@ export function EndpointDetailClient({ id }: { id: string }) {
     const updated = await res.json();
     setEndpoint(updated);
     toast.success("Saved");
-  }
-
-  async function createClient() {
-    const clientId = newClientId.trim();
-    if (!clientId) return;
-    setCreatingClient(true);
-    try {
-      const res = await fetch(`/api/endpoints/${id}/clients`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        toast.error(data?.error && typeof data.error === "string" ? data.error : "Failed to create client");
-        return;
-      }
-      const created = await res.json();
-      setClients((prev) => [created, ...prev]);
-      toast.success("Client created");
-      setNewClientId("");
-      setCreateClientOpen(false);
-    } finally {
-      setCreatingClient(false);
-    }
   }
 
   async function confirmDelete() {
@@ -279,6 +245,7 @@ export function EndpointDetailClient({ id }: { id: string }) {
                         Last seen {formatDistanceToNowStrict(new Date(client.lastSeenAt), { addSuffix: true })}
                       </p>
                     </div>
+                    <ClientActions client={client} onSaved={loadAll} />
                     <Button
                       variant="outline"
                       size="sm"
@@ -340,36 +307,7 @@ export function EndpointDetailClient({ id }: { id: string }) {
         </CardContent>
       </Card>
 
-      <Dialog open={createClientOpen} onOpenChange={setCreateClientOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create a client</DialogTitle>
-            <DialogDescription>
-              Pre-register a client for this endpoint before it ever connects — useful for generating
-              its config ahead of time. This becomes the value sent as{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">X-MCP-Client-Id</code>.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-1.5">
-            <Label>Client name or ID</Label>
-            <Input
-              placeholder="e.g. Claude Code, MacBook Pro"
-              value={newClientId}
-              onChange={(e) => setNewClientId(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && createClient()}
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateClientOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={createClient} disabled={!newClientId.trim() || creatingClient}>
-              Create
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {createClientOpen && <ClientEditor endpointId={id} onSaved={loadAll} onClose={() => setCreateClientOpen(false)} />}
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>

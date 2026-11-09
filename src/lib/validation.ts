@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CLIENT_ICON_IDS } from "./client-identity";
 
 export const backendServerInputSchema = z.discriminatedUnion("connectionType", [
   z.object({
@@ -66,5 +67,7 @@ export const toolToggleInputSchema = z.object({
 });
 
 export const createEndpointClientSchema = z.object({
-  clientId: z.string().min(1),
-});
+  clientId: z.string().trim().min(1).max(128).regex(/^[\x20-\x7e]+$/, "Use a printable ASCII client ID"),
+  label: z.string().trim().max(120).nullable().optional(),
+  icon: z.enum(CLIENT_ICON_IDS).default("auto"),
+}).strict();

@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { eq, desc } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/server/db/client";
-import { endpointClients } from "@/server/db/schema";
+import { clientEndpoints, endpointClients } from "@/server/db/schema";
+import { emitGatewayEvent } from "@/server/events/bus";
 import { createEndpointClientSchema } from "@/lib/validation";
 
 type Params = { params: Promise<{ id: string }> };
@@ -27,11 +28,18 @@ async function post(req: Request, { params }: Params) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
+  const db = getDb();
+  if (!db.select({ id: clientEndpoints.id }).from(clientEndpoints).where(eq(clientEndpoints.id, id)).get()) {
+    return NextResponse.json({ error: "Endpoint not found" }, { status: 404 });
+  }
+  if (db.select({ id: endpointClients.id }).from(endpointClients).where(eq(endpointClients.endpointId, id)).limit(1).offset(999).get()) {
+    return NextResponse.json({ error: "This endpoint has reached its client limit" }, { status: 409 });
+  }
   let row;
   try {
     [row] = await getDb()
       .insert(endpointClients)
-      .values({ id: randomUUID(), endpointId: id, clientId: parsed.data.clientId })
+      .values({ id: randomUUID(), endpointId: id, clientId: parsed.data.clientId, label: parsed.data.label || null, icon: parsed.data.icon })
       .returning();
   } catch (err) {
     if (err instanceof Error && /UNIQUE constraint failed/.test(err.message)) {
@@ -40,6 +48,7 @@ async function post(req: Request, { params }: Params) {
     throw err;
   }
 
+  emitGatewayEvent({ type: "client.changed", endpointId: id });
   return NextResponse.json(row, { status: 201 });
 }
 

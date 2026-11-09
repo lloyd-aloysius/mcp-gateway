@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 
 export type GatewayEvent =
   | { type: "server.status_changed"; serverId: string; serverKey: string; status: string; lastError?: string | null }
+  | { type: "client.changed"; endpointId: string }
   | { type: "endpoint.created"; endpointId: string }
   | { type: "endpoint.updated"; endpointId: string }
   | { type: "endpoint.deleted"; endpointId: string }

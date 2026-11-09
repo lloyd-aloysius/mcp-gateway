@@ -298,6 +298,7 @@ export function EndpointNode({ data }: NodeProps<Node<EndpointNodeData>>) {
 export type ClientNodeData = {
   clientId: string;
   label: string | null;
+  icon?: string;
   lastSeenAt: string;
   pulseStatus?: PulseStatus;
 };

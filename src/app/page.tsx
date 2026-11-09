@@ -39,6 +39,7 @@ type EndpointClientRow = {
   endpointId: string;
   clientId: string;
   label: string | null;
+  icon?: string;
   lastSeenAt: string;
 };
 
@@ -139,6 +140,10 @@ export default function Home() {
 
   const handleEvent = useCallback(
     (event: GatewayEvent) => {
+      if (event.type === "client.changed") {
+        void refetchClients();
+        return;
+      }
       if (event.type === "server.status_changed" || event.type.startsWith("endpoint.")) {
         void refetchServers();
         void refetchEndpoints();

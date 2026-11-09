@@ -123,6 +123,7 @@ type EndpointClientRow = {
   endpointId: string;
   clientId: string;
   label: string | null;
+  icon?: string;
   lastSeenAt: string;
 };
 
@@ -328,6 +329,7 @@ export function GatewayFlow({
           data: {
             clientId: c.clientId,
             label: c.label,
+            icon: c.icon,
             lastSeenAt: c.lastSeenAt,
             pulseStatus: pulse?.status ?? "idle",
           },

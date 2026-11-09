@@ -1,6 +1,6 @@
 # Admin API reference
 
-This reference describes the MCP Gateway 0.4.x contract. Use the actual trusted
+This reference describes the MCP Gateway 0.6.x contract. Use the actual trusted
 dashboard origin for every relative route below.
 
 ## Authentication
@@ -110,3 +110,11 @@ Audit queries support `endpointId`, `backendServerId`, `clientId`,
 `status`, `operationType`, `search`, `itemName`, `from`, and `to`.
 For recent tool calls, use `operationType=tools%2Fcall`. Use `nextCursor`
 as the next request's `before` value for older rows.
+
+## Client profiles (0.6.0)
+
+`GET /api/endpoints/clients` lists saved client profiles. `POST /api/endpoints/<id>/clients` pre-registers a profile with `clientId`, optional `label`, and optional `icon` (defaults to `auto`). IDs must be printable ASCII, at most 128 characters; labels allow up to 120 characters.
+
+`PATCH /api/endpoints/clients` accepts the profile's database `id` and an optional `label` and/or `icon`. It never changes the connection ID or endpoint credentials. Valid icons are `auto`, `codex`, `claude-code`, `claude-desktop`, `antigravity`, `openclaw`, `hermes`, `cursor`, `windsurf`, `github-copilot`, `generic`, `terminal`, `bot`, `browser`, and `service`. Manual choices override name detection; set `auto` to restore detection.
+
+`DELETE /api/endpoints/clients` accepts `{ "id": "<profile-id>" }`. It forgets only the saved profile. Audit history and endpoint credentials/permissions remain; later traffic can recreate the profile. To revoke access, manage the endpoint's token or access rules instead. All profile mutations require admin authorization and trusted-origin checks.
