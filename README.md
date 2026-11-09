@@ -4,7 +4,7 @@ A self-hosted dashboard for aggregating multiple [Model Context Protocol](https:
 
 Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL instead of configuring each backend server individually. Namespaced tools (`server__tool`) from every connected backend show up as one unified toolset, with fine-grained control over which client can use which server.
 
-![Gateway overview with two server columns on the left, three endpoints and their clients on the right, and tool calls in flight alongside Live activity](docs/screenshots/overview.png)
+![Live gateway demo with ten backends, twelve named clients, moving request particles and a populated activity feed](docs/screenshots/overview-live.gif)
 
 ## Features
 
@@ -22,13 +22,14 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 - **Unique URL + token per client** — create as many endpoints as you need; each gets its own bearer token, stored as a SHA-256 hash and shown in full exactly once.
 - **Two default policies** — allow-everything-then-restrict, or deny-everything-then-grant, set per endpoint.
 - **Per-server override rules** — a 3-state table (Allow / Deny / Inherit default) per backend server, evaluated fresh on *every* call rather than cached into a session's tool list — a rule change takes effect on the client's next call, no gateway restart needed.
+- **Named client identities** — edit display names in **Settings → Clients**. Codex, Claude Code and Antigravity get recognizable product icons automatically; other names use a matching generic icon. Names are scoped to the endpoint and never change connection IDs or tokens.
 - **Connected-client tracking** — endpoints identify distinct callers via an `X-MCP-Client-Id` header (or a random fallback if a client doesn't send one), so one endpoint shared across, say, both Claude Desktop and Claude Code shows each as a separate tracked client with its own last-seen time.
 - **Ready-to-copy client config** — a config panel with `mcp.json` / Claude CLI / Tailscale tabs; the server entry name shown to clients is always the fixed `mcp-gateway`, so renaming an endpoint in the dashboard never breaks an already-configured client.
 
 ### Live visualization & audit
 
 - **Real-time network diagram**. The overview groups growing server inventories into two staggered columns and refits when nodes are added or removed. Client requests animate from client to endpoint to gateway to server. Denied calls stop at the gateway. Even quick calls get a full particle pass, and overlapping calls keep shared links active.
-- **Live activity**. The card shows only the newest complete rows that fit. New calls arrive at the top and push the oldest visible row out. The feed shows the actual completion time while the graph animation finishes. Use **Audit Log** to browse older calls.
+- **Live activity**. Compact three-line entries show the caller and icon, time, tool, result and duration, and endpoint-to-backend route. The card fits at least 1.5× more calls than the previous layout at standard desktop and mobile sizes, showing only the newest complete rows that fit. New calls arrive at the top and push the oldest visible row out. The feed shows the actual completion time while the graph animation finishes. Use **Audit Log** to browse older calls.
 - **Full audit log** — every tool call, resource read, and prompt fetch is recorded, including denials, with exact and relative timestamps, duration, and outcome. Filterable by endpoint, server, client, and status, with free-text search and CSV export.
 
 ### Security & deployment
@@ -43,6 +44,19 @@ Point Claude Desktop, Claude Code, or any other MCP client at one gateway URL in
 - **CI-verified releases** — every push runs typecheck/lint/build; tagged releases automatically publish to npm (via OIDC Trusted Publishing — no stored npm token) and create a GitHub Release with auto-generated notes.
 
 ## Screenshots
+
+Screenshots and the animated overview use synthetic demo data and local fixture backends; they contain no personal gateway configuration or credentials. The animation captures real MCP calls and the minimum-duration particle flow, alongside actual call durations in Live activity.
+
+<details>
+<summary><strong>Client identities and live activity</strong> — themed product icons, compact cards and a denser feed</summary>
+
+![Populated gateway overview with compact client cards and active request particles](docs/screenshots/overview.png)
+
+![Settings client names with automatic Codex, Claude Code, Antigravity and generic icons](docs/screenshots/client-settings.png)
+
+Client cards show just the icon and configured name. In **Settings → Clients**, an empty display name falls back to the connection's client ID. Icons update from the name automatically. Live activity uses the same identity for new and historical calls, with full error/policy details on hover. No scroll is needed: new calls enter at the top and the oldest visible row leaves the card.
+
+</details>
 
 <details>
 <summary><strong>Dashboard sign-in</strong></summary>
@@ -260,5 +274,7 @@ conventions, and the PR checklist. Everyone participating is expected to
 follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
+
+Client product marks and asset attribution are documented in [Client icon artwork](docs/client-icons.md).
 
 MIT — see [LICENSE](LICENSE).

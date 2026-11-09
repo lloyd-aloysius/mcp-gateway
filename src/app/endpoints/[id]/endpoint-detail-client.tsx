@@ -8,6 +8,7 @@ import { format, formatDistanceToNowStrict } from "date-fns";
 import { ArrowLeft, Trash2, Copy, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ClientAvatar } from "@/components/flow/client-avatar";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -268,7 +269,8 @@ export function EndpointDetailClient({ id }: { id: string }) {
               {clients.map((client) => (
                 <div key={client.id} className="rounded-lg border">
                   <div className="flex items-center justify-between gap-3 px-3 py-2">
-                    <div className="min-w-0">
+                    <ClientAvatar client={client} />
+                    <div className="min-w-0 flex-1">
                       <p className="truncate font-mono text-sm">{client.label ?? client.clientId}</p>
                       <p
                         className="text-xs text-muted-foreground"

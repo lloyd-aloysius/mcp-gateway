@@ -4,12 +4,16 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import { Activity, CheckCircle2, XCircle, ShieldAlert } from "lucide-react";
+import { ClientAvatar } from "./client-avatar";
+import { clientName, type ClientIdentity } from "@/lib/client-identity";
 import { cn } from "@/lib/utils";
 
 export type ActivityEntry = {
   id: string;
   timestamp: number;
   status: "pending" | "success" | "error" | "denied";
+  endpointId?: string | null;
+  clientId?: string | null;
   endpointName: string;
   toolName: string;
   serverKey?: string | null;
@@ -24,6 +28,7 @@ const STATUS_ICON = {
   denied: ShieldAlert,
 };
 
+// Compact rows also fit five entries in the mobile card (previously three).
 const ROW_HEIGHT = 60;
 
 const STATUS_STYLE: Record<ActivityEntry["status"], { dot: string; detail: string }> = {
@@ -38,7 +43,7 @@ function detailLine(entry: ActivityEntry): string {
     case "pending":
       return "Running…";
     case "success":
-      return `Completed in ${entry.durationMs ?? 0}ms${entry.serverKey ? ` · via ${entry.serverKey}` : ""}`;
+      return `Completed in ${entry.durationMs ?? 0}ms`;
     case "denied":
       return "Denied by endpoint access policy";
     case "error":
@@ -46,7 +51,7 @@ function detailLine(entry: ActivityEntry): string {
   }
 }
 
-export function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
+export function ActivityFeed({ entries, clients = [] }: { entries: ActivityEntry[]; clients?: (ClientIdentity & { endpointId: string })[] }) {
   const listRef = useRef<HTMLUListElement>(null);
   const [capacity, setCapacity] = useState(0);
   const hasEntries = entries.length > 0;
@@ -72,12 +77,12 @@ export function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
   const visible = entries.slice(0, capacity);
 
   return (
-    <ul ref={listRef} aria-labelledby="live-activity-heading" className="relative h-full overflow-clip px-4 py-3">
+    <ul ref={listRef} aria-labelledby="live-activity-heading" className="relative h-full overflow-clip px-3 py-2">
       <AnimatePresence mode="popLayout" initial={false}>
-        {visible.map((entry, index) => {
+        {visible.map((entry) => {
+          const caller = clients.find((c) => c.endpointId === entry.endpointId && c.clientId === entry.clientId) ?? (entry.clientId ? { clientId: entry.clientId } : null);
           const Icon = STATUS_ICON[entry.status];
           const style = STATUS_STYLE[entry.status];
-          const isLast = index === visible.length - 1;
           const detail = detailLine(entry);
           return (
             <motion.li
@@ -87,36 +92,28 @@ export function ActivityFeed({ entries }: { entries: ActivityEntry[] }) {
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.2 }}
               style={{ height: ROW_HEIGHT }}
-              className="relative flex gap-3 pl-1"
+              className="flex items-center gap-2.5 border-b border-border/40 last:border-b-0"
             >
-              {!isLast && (
-                <span className="absolute left-[9.5px] top-5 bottom-[-4px] w-px bg-border" />
-              )}
-              <span
-                className={cn(
-                  "relative z-10 mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full ring-4 ring-card",
-                  style.dot
-                )}
-              >
-                <Icon className={cn("size-3", entry.status === "pending" && "animate-pulse")} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <p
-                    title={`${entry.endpointName} → ${entry.toolName}`}
-                    className="line-clamp-2 min-w-0 font-mono text-[11px] font-medium leading-snug [overflow-wrap:anywhere]"
-                  >
-                    {entry.endpointName} <span className="text-muted-foreground">→</span> {entry.toolName}
+              <ClientAvatar client={caller} className="size-7 rounded-lg" />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p title={clientName(caller)} className="min-w-0 truncate text-[11px] font-semibold leading-[14px]">
+                    {clientName(caller)}
                   </p>
-                  <span
-                    className="shrink-0 pt-px font-mono text-[10px] leading-snug text-muted-foreground/60"
-                    title={format(entry.timestamp, "MMM d, yyyy 'at' h:mm a")}
-                  >
+                  <span className="shrink-0 text-[9px] leading-[14px] text-muted-foreground"
+                    title={format(entry.timestamp, "MMM d, yyyy 'at' h:mm:ss a")}>
                     {formatDistanceToNowStrict(entry.timestamp, { addSuffix: true })}
                   </span>
                 </div>
-                <p title={detail} className={cn("mt-0.5 truncate text-[11px] leading-snug", style.detail)}>
-                  {detail}
+                <div className="flex items-center justify-between gap-2">
+                  <p className="min-w-0 truncate font-mono text-[11px] leading-[14px]" title={entry.toolName}>{entry.toolName}</p>
+                  <span title={detail} aria-label={detail} className={cn("inline-flex shrink-0 items-center gap-1 text-[10px] leading-[14px]", style.detail)}>
+                    <Icon aria-hidden="true" className={cn("size-3", entry.status === "pending" && "animate-pulse")} />
+                    {entry.status === "success" ? `${entry.durationMs ?? 0}ms` : entry.status === "pending" ? "Running" : entry.status === "denied" ? "Denied" : "Failed"}
+                  </span>
+                </div>
+                <p className="truncate text-[10px] leading-[13px] text-muted-foreground" title={`${entry.endpointName} → ${entry.serverKey ?? "Gateway"}`}>
+                  {entry.endpointName} <span aria-hidden="true" className="px-0.5 text-muted-foreground/60">→</span> {entry.serverKey ?? "Gateway"}
                 </p>
               </div>
             </motion.li>

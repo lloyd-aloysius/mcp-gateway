@@ -9,6 +9,9 @@ const files = new Set(pack.files.map(({ path }) => path));
 const standalone = ".next/standalone/";
 const required = [
   "bin/cli.mjs",
+  "docs/client-icons.md",
+  "docs/licenses/lobe-icons-MIT.txt",
+  "docs/screenshots/client-settings.png",
   "skills/mcp-gateway/SKILL.md",
   "skills/mcp-gateway/LICENSE",
   "skills/mcp-gateway/agents/openai.yaml",

@@ -168,6 +168,26 @@ test("built gateway security and startup", { timeout: 30_000 }, async (t) => {
     })).status, 413);
   });
 
+  await t.test("client names persist per endpoint and reject unauthorized or malformed updates", async () => {
+    const first = await json(adminPath + "/clients", "POST", { clientId: "identity-fixture" });
+    const otherEndpoint = await json("/api/endpoints", "POST", { name: "Other client scope", slug: "identity-scope", defaultPolicy: "deny_all" });
+    const other = await json("/api/endpoints/" + otherEndpoint.id + "/clients", "POST", { clientId: "identity-fixture" });
+    const payload = { id: first.id, label: "  Codex Mac  " };
+    assert.equal((await request("/api/endpoints/clients", "PATCH", payload, { authorization: "" })).status, 401);
+    assert.equal((await request("/api/endpoints/clients", "PATCH", payload, { authorization: "Bearer " + endpoint.token })).status, 401);
+    assert.equal((await request("/api/endpoints/clients", "PATCH", payload, { origin: "https://foreign.invalid" })).status, 403);
+    assert.equal((await request("/api/endpoints/clients", "PATCH", { ...payload, label: "x".repeat(121) })).status, 400);
+    assert.equal((await request("/api/endpoints/clients", "PATCH", { ...payload, clientId: "changed" })).status, 400);
+    assert.equal((await request("/api/endpoints/clients", "PATCH", { ...payload, id: "missing" })).status, 404);
+    const saved = await json("/api/endpoints/clients", "PATCH", payload);
+    assert.equal(saved.label, "Codex Mac");
+    assert.equal(saved.clientId, first.clientId);
+    const rows = await json("/api/endpoints/clients");
+    assert.equal(rows.find((row) => row.id === first.id).label, "Codex Mac");
+    assert.equal(rows.find((row) => row.id === other.id).label, null);
+    assert.equal((await json("/api/endpoints/clients", "PATCH", { id: first.id, label: " " })).label, null);
+  });
+
   await t.test("browser sign-in issues a revocable session and protects mutations from cross-origin requests", async () => {
     assert.equal((await request("/login", "GET", undefined, { authorization: "" })).status, 200);
     const login = (password, origin = base) => request("/api/admin/session", "POST", { password }, {

@@ -1,5 +1,6 @@
 "use client";
 
+import { ClientSettings } from "@/components/settings/client-settings";
 import { gatewayVersion } from "@/lib/gateway-version";
 import { useEffect, useState } from "react";
 import { AlertTriangle, Moon, Sun, Monitor } from "lucide-react";
@@ -118,6 +119,8 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <ClientSettings />
 
       <GatewayOperations />
 

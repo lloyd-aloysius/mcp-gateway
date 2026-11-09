@@ -34,7 +34,7 @@ const NODE_DIMENSIONS = {
   gateway: { width: 208, height: 130 },
   server: { width: 320, height: 200 },
   endpoint: { width: 320, height: 170 },
-  client: { width: 224, height: 90 },
+  client: { width: 224, height: 64 },
 } as const;
 
 const SERVER_X = 0;
@@ -47,7 +47,7 @@ const HUB_GAP = GATEWAY_X - SERVER_X - NODE_DIMENSIONS.server.width;
 const ENDPOINT_X = GATEWAY_X + NODE_DIMENSIONS.gateway.width + HUB_GAP;
 // Separate, smaller gap for the client fan-out — this one was already correct as-is.
 export const CLIENT_X = ENDPOINT_X + NODE_DIMENSIONS.endpoint.width + 80;
-const CLIENT_ROW_HEIGHT = 110;
+const CLIENT_ROW_HEIGHT = 88;
 const ENDPOINT_GROUP_GAP = ROW_HEIGHT - NODE_DIMENSIONS.endpoint.height;
 
 // Edge source/target coordinates are computed from each node's *handle* bounds, which React Flow

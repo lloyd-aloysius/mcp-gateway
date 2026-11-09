@@ -45,6 +45,8 @@ type EndpointClientRow = {
 type AuditRow = {
   id: number;
   timestamp: string;
+  endpointId: string | null;
+  clientId: string | null;
   endpointNameSnapshot: string | null;
   backendServerKeySnapshot: string | null;
   itemName: string | null;
@@ -116,6 +118,8 @@ export default function Home() {
         const seeded: ActivityEntry[] = data.rows
           .map((row) => ({
             id: `audit-${row.id}`,
+            endpointId: row.endpointId,
+            clientId: row.clientId,
             timestamp: new Date(row.timestamp).getTime(),
             status: row.status,
             endpointName: row.endpointNameSnapshot ?? "Unknown endpoint",
@@ -171,6 +175,8 @@ export default function Home() {
         setActivity((prev) => [
           {
             id: event.callId,
+            endpointId: event.endpointId,
+            clientId: event.clientId,
             timestamp: Date.now(),
             status: "pending" as const,
             endpointName: event.endpointName,
@@ -260,7 +266,7 @@ export default function Home() {
             <CardTitle id="live-activity-heading" className="text-sm">Live activity</CardTitle>
           </CardHeader>
           <CardContent className="min-h-0 flex-1 overflow-hidden p-0">
-            <ActivityFeed entries={activity} />
+            <ActivityFeed entries={activity} clients={clients ?? []} />
           </CardContent>
         </Card>
       </div>

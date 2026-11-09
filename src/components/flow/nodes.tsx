@@ -16,8 +16,9 @@ import {
   CircleDashed,
   Server as ServerIcon,
   Clock,
-  User,
 } from "lucide-react";
+import { ClientAvatar } from "./client-avatar";
+import { clientName } from "@/lib/client-identity";
 import { cn } from "@/lib/utils";
 import { PULSE_GLOW_COLOR } from "./status-colors";
 
@@ -305,27 +306,13 @@ export function ClientNode({ data }: NodeProps<Node<ClientNodeData>>) {
   const { wrapperClassName, wrapperStyle, overlay } = usePulseStyle(data.pulseStatus);
 
   return (
-    <div
-      className={cn(
-        "flex h-full w-56 items-start gap-2 rounded-lg border bg-card py-2 pl-3 pr-2.5 shadow-sm",
-        wrapperClassName
-      )}
-      style={wrapperStyle}
-    >
+    <div className={cn("relative flex h-full w-56 items-center gap-3 rounded-2xl border bg-card px-3 shadow-sm", wrapperClassName)} style={wrapperStyle}>
       {overlay}
-      <RoleStripe colorVar="--role-endpoint" />
       <Handle type="source" position={Position.Left} id="left" className="!bg-primary" />
-      <div className="relative shrink-0">
-        <RoleAvatar colorVar="--role-endpoint">
-          <User className="size-3.5" />
-        </RoleAvatar>
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-medium">{data.label ?? data.clientId}</p>
-        <DetailRow icon={Clock}>
-          {formatDistanceToNowStrict(new Date(data.lastSeenAt), { addSuffix: true })}
-        </DetailRow>
-      </div>
+      <ClientAvatar client={data} className="size-9" />
+      <p className="line-clamp-2 min-w-0 flex-1 break-words text-[13px] font-semibold leading-tight tracking-tight" title={clientName(data)}>
+        {clientName(data)}
+      </p>
     </div>
   );
 }
