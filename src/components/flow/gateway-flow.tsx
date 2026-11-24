@@ -8,6 +8,7 @@ import {
   Panel,
   Position,
   useReactFlow,
+  useStore,
   type Node,
   type Edge,
 } from "@xyflow/react";
@@ -76,46 +77,48 @@ function makeHandle(
   };
 }
 
-const NODE_HANDLES = {
+type NodeSizes = Record<keyof typeof NODE_DIMENSIONS, { width: number; height: number }>;
+const VIEWER_NODE_DIMENSIONS: NodeSizes = { ...NODE_DIMENSIONS, server: { width: 320, height: 112 }, endpoint: { width: 320, height: 96 } };
+function nodeHandles(dimensions: NodeSizes) { return {
   gateway: [
-    makeHandle("left", "target", Position.Left, NODE_DIMENSIONS.gateway.width, NODE_DIMENSIONS.gateway.height),
-    makeHandle("right", "source", Position.Right, NODE_DIMENSIONS.gateway.width, NODE_DIMENSIONS.gateway.height),
+    makeHandle("left", "target", Position.Left, dimensions.gateway.width, dimensions.gateway.height),
+    makeHandle("right", "source", Position.Right, dimensions.gateway.width, dimensions.gateway.height),
   ],
   server: [
-    makeHandle("right", "source", Position.Right, NODE_DIMENSIONS.server.width, NODE_DIMENSIONS.server.height),
+    makeHandle("right", "source", Position.Right, dimensions.server.width, dimensions.server.height),
   ],
   endpoint: [
-    makeHandle("left", "target", Position.Left, NODE_DIMENSIONS.endpoint.width, NODE_DIMENSIONS.endpoint.height),
-    makeHandle("right", "target", Position.Right, NODE_DIMENSIONS.endpoint.width, NODE_DIMENSIONS.endpoint.height),
+    makeHandle("left", "target", Position.Left, dimensions.endpoint.width, dimensions.endpoint.height),
+    makeHandle("right", "target", Position.Right, dimensions.endpoint.width, dimensions.endpoint.height),
   ],
   client: [
-    makeHandle("left", "source", Position.Left, NODE_DIMENSIONS.client.width, NODE_DIMENSIONS.client.height),
+    makeHandle("left", "source", Position.Left, dimensions.client.width, dimensions.client.height),
   ],
-};
+}; }
 
 type BackendServerRow = {
   id: string;
   name: string;
-  description: string | null;
+  description?: string | null;
   connectionType: "stdio" | "http" | "sse";
-  command: string | null;
-  args: string[] | null;
-  url: string | null;
+  command?: string | null;
+  args?: string[] | null;
+  url?: string | null;
   enabled: boolean;
   status: string;
   lastConnectedAt: string | null;
-  lastError: string | null;
-  pid: number | null;
+  lastError?: string | null;
+  pid?: number | null;
 };
 
 type EndpointRow = {
   id: string;
   name: string;
-  slug: string;
+  slug?: string;
   enabled: boolean;
-  defaultPolicy: "allow_all" | "deny_all";
+  defaultPolicy?: "allow_all" | "deny_all";
   lastUsedAt: string | null;
-  createdAt: string;
+  createdAt?: string;
   activeSessions: number;
 };
 
@@ -152,18 +155,20 @@ export type PulseState = Record<string, { status: "idle" | "active" | "success" 
 // of React Flow's default, unfit viewport (zoom 1, origin 0,0). No duration setting can prevent
 // that first frame from being visible; only hiding the canvas until the fit is confirmed applied
 // can (see the `ready`/`onFirstFit` handling in GatewayFlow below).
-function AutoFitView({ nodeIdsSignature, onFirstFit }: { nodeIdsSignature: string; onFirstFit: () => void }) {
+function AutoFitView({ nodeIdsSignature, onFirstFit, fitOnResize = false }: { nodeIdsSignature: string; onFirstFit: () => void; fitOnResize?: boolean }) {
+  const viewportSize = useStore((state) => `${state.width}:${state.height}`);
+  const signature = fitOnResize ? `${nodeIdsSignature}:${viewportSize}` : nodeIdsSignature;
   const { fitView } = useReactFlow();
   const lastFitSignature = useRef<string | null>(null);
 
   useEffect(() => {
-    if (lastFitSignature.current === nodeIdsSignature) return;
+    if (lastFitSignature.current === signature) return;
     const isFirstFit = lastFitSignature.current === null;
-    lastFitSignature.current = nodeIdsSignature;
+    lastFitSignature.current = signature;
     void fitView({ padding: FLOW_PADDING, duration: isFirstFit ? 0 : 200 }).then(() => {
       if (isFirstFit) onFirstFit();
     });
-  }, [nodeIdsSignature, fitView, onFirstFit]);
+  }, [signature, fitView, onFirstFit]);
 
   return null;
 }
@@ -188,17 +193,23 @@ export function GatewayFlow({
   endpoints,
   clients = [],
   pulses,
+  visualizationOnly = false,
 }: {
   servers: BackendServerRow[];
   endpoints: EndpointRow[];
   clients?: EndpointClientRow[];
   pulses: PulseState;
+  visualizationOnly?: boolean;
 }) {
+  const dimensions = visualizationOnly ? VIEWER_NODE_DIMENSIONS : NODE_DIMENSIONS;
+  const handles = useMemo(() => nodeHandles(dimensions), [dimensions]);
+  const rowHeight = visualizationOnly ? 164 : ROW_HEIGHT;
+  const groupGap = visualizationOnly ? 56 : ENDPOINT_GROUP_GAP;
   const { nodes, edges } = useMemo(() => {
     const orderedServers = [...servers].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     const staggered = orderedServers.length >= 5;
-    const serverStep = staggered ? ROW_HEIGHT / 2 : ROW_HEIGHT;
-    const serverTop = -((orderedServers.length - 1) * serverStep + NODE_DIMENSIONS.server.height) / 2;
+    const serverStep = staggered ? rowHeight / 2 : rowHeight;
+    const serverTop = -((orderedServers.length - 1) * serverStep + dimensions.server.height) / 2;
 
     const clientsByEndpoint = new Map<string, EndpointClientRow[]>();
     for (const client of clients) {
@@ -209,17 +220,17 @@ export function GatewayFlow({
     const endpointGroups = endpoints.map((endpoint) => {
       const clients = clientsByEndpoint.get(endpoint.id) ?? [];
       const clientHeight = clients.length > 0
-        ? (clients.length - 1) * CLIENT_ROW_HEIGHT + NODE_DIMENSIONS.client.height
+        ? (clients.length - 1) * CLIENT_ROW_HEIGHT + dimensions.client.height
         : 0;
-      return { endpoint, clients, clientHeight, height: Math.max(NODE_DIMENSIONS.endpoint.height, clientHeight) };
+      return { endpoint, clients, clientHeight, height: Math.max(dimensions.endpoint.height, clientHeight) };
     });
     const endpointHeight = endpointGroups.reduce((sum, group) => sum + group.height, 0)
-      + Math.max(0, endpointGroups.length - 1) * ENDPOINT_GROUP_GAP;
+      + Math.max(0, endpointGroups.length - 1) * groupGap;
     let groupTop = -endpointHeight / 2;
     const placedEndpoints = [];
     for (const group of endpointGroups) {
       placedEndpoints.push({ ...group, center: groupTop + group.height / 2 });
-      groupTop += group.height + ENDPOINT_GROUP_GAP;
+      groupTop += group.height + groupGap;
     }
 
     const anyActive = Object.values(pulses).some((p) => p.status === "active");
@@ -230,55 +241,57 @@ export function GatewayFlow({
       {
         id: "gateway",
         type: "gateway",
-        position: { x: GATEWAY_X, y: -NODE_DIMENSIONS.gateway.height / 2 },
+        position: { x: GATEWAY_X, y: -dimensions.gateway.height / 2 },
         data: { serverCount: servers.length, endpointCount: endpoints.length, pulseStatus: gatewayPulse },
         draggable: false,
-        ...NODE_DIMENSIONS.gateway,
-        measured: NODE_DIMENSIONS.gateway,
-        handles: NODE_HANDLES.gateway,
+        ...dimensions.gateway,
+        measured: dimensions.gateway,
+        handles: handles.gateway,
       },
       ...orderedServers.map((s, i) => ({
         id: `server-${s.id}`,
         type: "server",
         position: { x: staggered && i % 2 === 1 ? OUTER_SERVER_X : SERVER_X, y: serverTop + i * serverStep },
         data: {
+          visualizationOnly,
           name: s.name,
-          description: s.description,
+          description: s.description ?? null,
           connectionType: s.connectionType,
           enabled: s.enabled,
           status: s.status,
           target: serverTarget(s),
           host: serverHost(s),
-          pid: s.pid,
+          pid: s.pid ?? null,
           lastConnectedAt: s.lastConnectedAt,
-          lastError: s.lastError,
+          lastError: s.lastError ?? null,
           pulseStatus: pulses[`server-${s.id}`]?.status ?? "idle",
         },
         draggable: false,
         sourcePosition: Position.Right,
-        ...NODE_DIMENSIONS.server,
-        measured: NODE_DIMENSIONS.server,
-        handles: NODE_HANDLES.server,
+        ...dimensions.server,
+        measured: dimensions.server,
+        handles: handles.server,
       })),
       ...placedEndpoints.map(({ endpoint: e, center }) => ({
         id: `endpoint-${e.id}`,
         type: "endpoint",
-        position: { x: ENDPOINT_X, y: center - NODE_DIMENSIONS.endpoint.height / 2 },
+        position: { x: ENDPOINT_X, y: center - dimensions.endpoint.height / 2 },
         data: {
+          visualizationOnly,
           name: e.name,
-          slug: e.slug,
+          slug: e.slug ?? "",
           enabled: e.enabled,
-          defaultPolicy: e.defaultPolicy,
+          defaultPolicy: e.defaultPolicy ?? "deny_all",
           lastUsedAt: e.lastUsedAt,
-          createdAt: e.createdAt,
+          createdAt: e.createdAt ?? "",
           activeSessions: e.activeSessions,
           pulseStatus: pulses[`endpoint-${e.id}`]?.status ?? "idle",
         },
         draggable: false,
         targetPosition: Position.Left,
-        ...NODE_DIMENSIONS.endpoint,
-        measured: NODE_DIMENSIONS.endpoint,
-        handles: NODE_HANDLES.endpoint,
+        ...dimensions.endpoint,
+        measured: dimensions.endpoint,
+        handles: handles.endpoint,
       })),
     ];
 
@@ -335,9 +348,9 @@ export function GatewayFlow({
           },
           draggable: false,
           sourcePosition: Position.Left,
-          ...NODE_DIMENSIONS.client,
-          measured: NODE_DIMENSIONS.client,
-          handles: NODE_HANDLES.client,
+          ...dimensions.client,
+          measured: dimensions.client,
+          handles: handles.client,
         });
         edges.push({
           id: `edge-${nodeId}`,
@@ -352,7 +365,7 @@ export function GatewayFlow({
     }
 
     return { nodes, edges };
-  }, [servers, endpoints, clients, pulses]);
+  }, [servers, endpoints, clients, pulses, visualizationOnly, dimensions, handles, rowHeight, groupGap]);
 
   const nodeIdsSignature = useMemo(() => JSON.stringify(
     nodes.map(({ id, position: { x, y } }) => ({ id, x, y })).sort((a, b) => a.id.localeCompare(b.id))
@@ -378,7 +391,7 @@ export function GatewayFlow({
         edgeTypes={edgeTypes}
         fitView
         fitViewOptions={{ padding: FLOW_PADDING }}
-        minZoom={0.15}
+        minZoom={visualizationOnly ? 0.1 : 0.15}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
         nodesConnectable={false}
@@ -387,7 +400,7 @@ export function GatewayFlow({
         zoomOnPinch
         zoomOnDoubleClick={false}
       >
-        <AutoFitView nodeIdsSignature={nodeIdsSignature} onFirstFit={() => setReady(true)} />
+        <AutoFitView nodeIdsSignature={nodeIdsSignature} onFirstFit={() => setReady(true)} fitOnResize={visualizationOnly} />
         <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--flow-dot)" />
         <Panel position="bottom-right">
           <FlowControls />

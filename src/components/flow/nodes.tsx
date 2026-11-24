@@ -122,6 +122,7 @@ function DetailRow({ icon: Icon, mono, children }: { icon: typeof Clock; mono?: 
 const CARD_WIDTH = "w-80";
 
 export type ServerNodeData = {
+  visualizationOnly?: boolean;
   name: string;
   description: string | null;
   connectionType: "stdio" | "http" | "sse";
@@ -139,6 +140,14 @@ export function ServerNode({ data }: NodeProps<Node<ServerNodeData>>) {
   const Icon = TYPE_ICON[data.connectionType] ?? Terminal;
   const roleVar = TYPE_ROLE_VAR[data.connectionType];
   const { wrapperClassName, wrapperStyle, overlay } = usePulseStyle(data.pulseStatus);
+
+  if (data.visualizationOnly) return (
+    <div className={cn("flex h-full w-80 items-center gap-3 rounded-xl border bg-card px-4 shadow-sm", wrapperClassName)} style={wrapperStyle}>
+      {overlay}<RoleStripe colorVar={roleVar} /><Handle type="source" position={Position.Right} id="right" className="!bg-primary" />
+      <div className="relative shrink-0"><RoleAvatar colorVar={roleVar}><Icon className="size-4" /></RoleAvatar><StatusBadge status={data.enabled ? data.status : "disconnected"} /></div>
+      <div className="min-w-0"><p className="line-clamp-2 break-words text-sm font-semibold">{data.name}</p><p className="mt-1 text-xs text-muted-foreground">{data.enabled ? STATUS_LABEL[data.status] ?? data.status : "Disabled"} · {TYPE_LABEL[data.connectionType]}</p></div>
+    </div>
+  );
 
   return (
     <div
@@ -230,6 +239,7 @@ export function GatewayNode({ data }: NodeProps<Node<GatewayNodeData>>) {
 }
 
 export type EndpointNodeData = {
+  visualizationOnly?: boolean;
   name: string;
   slug: string;
   enabled: boolean;
@@ -248,6 +258,15 @@ function endpointStatus(data: EndpointNodeData): string {
 export function EndpointNode({ data }: NodeProps<Node<EndpointNodeData>>) {
   const { wrapperClassName, wrapperStyle, overlay } = usePulseStyle(data.pulseStatus);
   const status = endpointStatus(data);
+
+  if (data.visualizationOnly) return (
+    <div className={cn("flex h-full w-80 items-center gap-3 rounded-xl border bg-card px-4 shadow-sm", wrapperClassName)} style={wrapperStyle}>
+      {overlay}<RoleStripe colorVar="--role-endpoint" />
+      <Handle type="target" position={Position.Left} id="left" className="!bg-primary" /><Handle type="target" position={Position.Right} id="right" className="!bg-primary" />
+      <RoleAvatar colorVar="--role-endpoint"><Plug className="size-4" /></RoleAvatar>
+      <div className="min-w-0"><p className="line-clamp-2 break-words text-sm font-semibold">{data.name}</p><p className="mt-1 text-xs text-muted-foreground">{!data.enabled ? "Disabled" : `${data.activeSessions} active session${data.activeSessions === 1 ? "" : "s"}`}</p></div>
+    </div>
+  );
 
   return (
     <div

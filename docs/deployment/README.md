@@ -76,3 +76,46 @@ Configure token introspection when you need issuer revocation to take effect
 on the next HTTP request. Sessions with an open stream also expire when the
 credential expires. The proxy must expose the matching protected-resource
 metadata path on the MCP hostname.
+
+## Private visualization URL
+
+The optional `/view` page renders topology, client icons and live activity without
+a sidebar, settings or an admin token. Set `MCP_GATEWAY_VIEWER_ORIGINS` to the
+exact origin of a dedicated private hostname, then restart the gateway. For example:
+
+```dotenv
+MCP_GATEWAY_VIEWER_ORIGINS=https://gateway-view.tailnet-name.ts.net
+```
+
+Open `https://gateway-view.tailnet-name.ts.net/view`. Keep the existing admin
+origin and credential configured separately. The viewer needs `/view`,
+`/api/viewer/snapshot`, `/api/viewer/events`, `/_next/static/`, `/client-icons/`
+and `/favicon.ico` forwarded to the same process. Preserve the original Host
+header and disable proxy buffering for the event stream. Its dedicated hostname
+does not need to forward admin or MCP routes.
+
+Use [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) or a
+tailnet-only reverse proxy, with tailnet access rules limiting who can reach the
+viewer. Keep the application's raw port private to that proxy (the default
+loopback bind is suitable when both run on the same host). Do not use Tailscale
+Funnel or a public reverse-proxy route for this hostname.
+
+The origin allowlist checks Host/Origin routing; it does **not** prove a request
+came from a tailnet device. The application does not trust forwarded IP or
+Tailscale identity headers as authentication. Anyone who can reach this ingress
+can see the read-only display names, client identities, tool names, statuses and
+timings. Restrict the network accordingly. Credentials, backend configuration,
+arguments/results, session IDs and raw errors are not included.
+
+The snapshot contains at most 50 recent tool calls. Event streams are limited to
+eight concurrent viewers per process and slow readers are disconnected. Removing
+the environment setting and restarting disables the viewer (404); the admin
+dashboard remains authenticated throughout.
+
+When the same application listener also serves a LAN or public ingress, configure
+`MCP_GATEWAY_VIEWER_PROXY_KEY` with a strong random secret. Put a loopback-only
+reverse proxy behind Tailscale Serve which replaces `X-MCP-Gateway-Viewer-Key`
+with that secret and forwards only the viewer routes/assets listed above. Keep
+the secret out of browser code and proxy responses. Requests reaching the app
+through another ingress are rejected without the private proxy key, even if
+they spoof an allowed viewer Host. Do not inject this key at your public ingress.

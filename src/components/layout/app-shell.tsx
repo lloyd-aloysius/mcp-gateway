@@ -53,6 +53,7 @@ export function AppShell({ children, version, canSignOut }: {
   const pathname = usePathname();
 
   if (pathname === "/login") return children;
+  if (pathname === "/view") return <main className="flex h-full min-h-0 w-full flex-1 flex-col overflow-y-auto">{children}</main>;
 
   return (
     <div className="flex h-full w-full">

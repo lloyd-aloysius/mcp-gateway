@@ -9,6 +9,9 @@ const files = new Set(pack.files.map(({ path }) => path));
 const standalone = ".next/standalone/";
 const required = [
   "bin/cli.mjs",
+  "docs/screenshots/viewer.png",
+  standalone + ".next/server/app/api/viewer/snapshot/route.js",
+  standalone + ".next/server/app/api/viewer/events/route.js",
   "docs/client-icons.md",
   "docs/licenses/lobe-icons-MIT.txt",
   "docs/screenshots/client-settings.png",

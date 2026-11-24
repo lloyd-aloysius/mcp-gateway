@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type GatewayEvent =
   | { type: "connected" }
@@ -25,15 +25,18 @@ export type GatewayEvent =
   | { type: "call.finished"; callId: string; status: "success" | "error" | "denied"; durationMs: number; error?: string }
   | { type: "audit.appended"; entryId: number };
 
-export function useEventStream(onEvent: (event: GatewayEvent) => void) {
+export function useEventStream(onEvent: (event: GatewayEvent) => void, url = "/api/events/stream") {
   const handlerRef = useRef(onEvent);
+  const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
 
   useEffect(() => {
     handlerRef.current = onEvent;
   }, [onEvent]);
 
   useEffect(() => {
-    const source = new EventSource("/api/events/stream");
+    const source = new EventSource(url);
+    source.onopen = () => setConnection("live");
+    source.onerror = () => setConnection("reconnecting");
     source.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data) as GatewayEvent;
@@ -43,5 +46,6 @@ export function useEventStream(onEvent: (event: GatewayEvent) => void) {
       }
     };
     return () => source.close();
-  }, []);
+  }, [url]);
+  return connection;
 }

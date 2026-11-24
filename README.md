@@ -225,6 +225,32 @@ Each client endpoint has a **default policy**:
 
 Per-server rules on the endpoint's settings page override the default for that server. Rule changes apply on the client's *next* call — no gateway restart required (though the client's own cached tool list may lag until it re-lists, which is normal MCP client behavior, not a gateway bug).
 
+## Read-only visualization
+
+![Read-only viewer with live activity](docs/screenshots/viewer.png)
+
+Use `/view` for a full-width topology and live activity screen with client icons,
+animated call paths, and a light/dark theme toggle. It has no sidebar or management
+controls and does not require an admin token. The viewer is disabled by default.
+
+To enable it on a private URL, set `MCP_GATEWAY_VIEWER_ORIGINS` to the exact
+origin (scheme, hostname and optional port), for example
+`https://gateway-view.tailnet-name.ts.net`, and open that origin followed by `/view`.
+Multiple origins can be comma-separated. Configure the private proxy to preserve Host.
+For shared listeners, use `MCP_GATEWAY_VIEWER_PROXY_KEY` with a private proxy
+that injects the key, so other ingress routes cannot access the viewer.
+The existing admin dashboard and admin APIs keep their authentication requirements.
+
+The viewer exposes display names, client identities/logos, connection status, tool
+names, call outcomes and timings. It excludes credentials, backend URLs/commands,
+configuration, call arguments/results, session IDs and raw error details. Only
+GET/HEAD requests are accepted on its dedicated snapshot and event APIs.
+
+**The origin allowlist does not authenticate tailnet membership.** Keep the listener
+and proxy reachable only through your tailnet and its access rules. Do not publish
+this tokenless viewer through public ingress or Tailscale Funnel. See the
+[private viewer deployment guide](docs/deployment/README.md#private-visualization-url).
+
 ## Configuration
 
 Copy `.env.example` to `.env` to override defaults:
@@ -236,6 +262,8 @@ Copy `.env.example` to `.env` to override defaults:
 | `HOST` | `127.0.0.1` | Host `npm start` binds to |
 | `MCP_GATEWAY_ADMIN_TOKEN` | Unset | Dashboard credential and admin API bearer token |
 | `MCP_GATEWAY_ADMIN_ORIGINS` | Loopback | Comma-separated trusted dashboard origins, including the scheme and port |
+| `MCP_GATEWAY_VIEWER_ORIGINS` | Disabled | Exact private origins allowed to serve the tokenless read-only `/view` |
+| `MCP_GATEWAY_VIEWER_PROXY_KEY` | Unset | Optional server-side key injected only by the private viewer proxy |
 
 ## Security notes
 

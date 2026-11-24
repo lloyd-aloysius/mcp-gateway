@@ -1,6 +1,6 @@
 {
   "name": "@lloyd-aloysius/mcp-gateway",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -32,7 +32,7 @@
     "build": "next build && node scripts/copy-standalone-assets.mjs",
     "start": "node scripts/start.mjs",
     "lint": "eslint",
-    "test:unit": "node --import tsx --test tests/backend-reconnect.test.mjs tests/oauth.test.mjs tests/client-identity.test.mjs",
+    "test:unit": "node --import tsx --test tests/backend-reconnect.test.mjs tests/oauth.test.mjs tests/client-identity.test.mjs tests/viewer.test.mjs",
     "test:security": "node --test tests/gateway-security.test.mjs",
     "prepare": "npm run build",
     "db:generate": "drizzle-kit generate",

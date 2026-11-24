@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { request as httpRequest } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -232,6 +233,89 @@ test("built gateway security and startup", { timeout: 30_000 }, async (t) => {
       assert.equal(rediscovered.icon, "auto");
       assert.equal(rediscovered.label, null);
     } finally { await client.close(); }
+  });
+
+  await t.test("tokenless viewer is opt-in, sanitized and isolated from admin access", async () => {
+    const anonymous = { authorization: "" };
+    for (const path of ["/view", "/api/viewer/snapshot", "/api/viewer/events"]) assert.equal((await request(path, "GET", undefined, anonymous)).status, 404);
+    await json("/api/servers", "POST", { name: "Viewer backend", key: "viewer-private-fixture", connectionType: "stdio", command: "/private/viewer-command-marker", args: ["private-argument-marker"], env: { PRIVATE_MARKER: "private-environment-marker" }, description: "private-description-marker", enabled: false });
+    const viewEndpoint = await json("/api/endpoints", "POST", { name: "Viewer endpoint", slug: "private-slug-marker", defaultPolicy: "allow_all" });
+    env.MCP_GATEWAY_VIEWER_ORIGINS = base;
+    await stopGateway(); startGateway(); await waitForGateway();
+    try {
+      const page = await request("/view", "GET", undefined, anonymous);
+      assert.equal(page.status, 200);
+      const html = await page.text();
+      assert.ok(html.includes("Live visualization"));
+      assert.ok(!html.includes("<aside"));
+      assert.ok(!html.includes('href="/settings"'));
+      assert.equal(page.headers.get("x-frame-options"), "DENY");
+      assert.ok(page.headers.get("cache-control").includes("no-store"));
+      assert.equal((await request("/api/viewer/snapshot", "GET", undefined, { ...anonymous, origin: "https://foreign.invalid" })).status, 403);
+      const foreignHostStatus = await new Promise((resolve, reject) => {
+        const req = httpRequest(base + "/api/viewer/snapshot", { headers: { host: "foreign.invalid", "x-forwarded-host": new URL(base).host, "x-forwarded-for": "100.64.1.1", "tailscale-user-login": "owner@example.invalid" } }, (res) => { res.resume(); resolve(res.statusCode); });
+        req.on("error", reject); req.end();
+      });
+      assert.equal(foreignHostStatus, 403);
+      for (const path of ["/api/servers", "/api/endpoints", "/api/endpoints/clients", "/api/settings/config", "/api/audit", "/api/events/stream"]) assert.equal((await request(path, "GET", undefined, anonymous)).status, 401);
+      assert.equal((await request("/api/endpoints/clients", "DELETE", { id: "anything" }, anonymous)).status, 401);
+      for (const method of ["POST", "PATCH", "DELETE", "PUT"]) assert.equal((await request("/api/viewer/snapshot", method, {}, anonymous)).status, 405);
+      const snapshotResponse = await request("/api/viewer/snapshot", "GET", undefined, anonymous);
+      assert.equal(snapshotResponse.status, 200);
+      const snapshot = await snapshotResponse.json();
+      const serialized = JSON.stringify(snapshot);
+      for (const secret of [ADMIN_TOKEN, viewEndpoint.token, viewEndpoint.tokenPrefix, "private-slug-marker", "viewer-command-marker", "private-argument-marker", "private-environment-marker", "private-description-marker"]) assert.ok(!serialized.includes(secret), secret);
+      const allKeys = new Set();
+      function keys(value) { if (value && typeof value === "object") for (const [key, child] of Object.entries(value)) { allKeys.add(key); keys(child); } }
+      keys(snapshot);
+      for (const key of ["env", "headers", "url", "args", "command", "pid", "lastError", "errorMessage", "requestArgsJson", "sessionId", "slug", "defaultPolicy", "tokenHash", "tokenPrefix"]) assert.ok(!allKeys.has(key), key);
+      assert.ok(snapshot.rows.length <= 50);
+      for (const icon of ["hermes", "openclaw"]) assert.equal((await request("/client-icons/" + icon + ".svg", "GET", undefined, anonymous)).status, 200);
+      const stop = new AbortController();
+      const stream = await fetch(base + "/api/viewer/events", { signal: AbortSignal.any([stop.signal, AbortSignal.timeout(5_000)]) });
+      assert.equal(stream.status, 200);
+      const reader = stream.body.getReader();
+      let events = "";
+      const finished = (async () => {
+        while (!events.includes('"type":"call.finished"')) {
+          const chunk = await reader.read();
+          if (chunk.done) throw new Error("Viewer stream ended before a call");
+          events += new TextDecoder().decode(chunk.value);
+        }
+      })();
+      const { client, sessionId } = await connect(viewEndpoint.token, viewEndpoint.slug, "viewer-test", "viewer-test");
+      try {
+        assert.ok(!(await client.callTool({ name: "gateway-tools__ping", arguments: {} })).isError);
+        await finished;
+        assert.ok(events.includes('"type":"call.started"'));
+        for (const secret of [ADMIN_TOKEN, viewEndpoint.token, sessionId, "errorMessage", "requestArgsJson"]) assert.ok(!events.includes(secret));
+      } finally { await reader.cancel().catch(() => {}); stop.abort(); await client.close(); }
+      const active = [];
+      try {
+        for (let i = 0; i < 8; i++) {
+          const stream = await fetch(base + "/api/viewer/events");
+          assert.equal(stream.status, 200); active.push(stream);
+          assert.equal((await request("/api/viewer/events", "HEAD", undefined, anonymous)).status, 200);
+        }
+        assert.equal((await request("/api/viewer/events", "GET", undefined, anonymous)).status, 429);
+        const adminStream = await request("/api/events/stream");
+        assert.equal(adminStream.status, 200); await adminStream.body.cancel();
+      } finally { await Promise.all(active.map((response) => response.body.cancel())); }
+      env.MCP_GATEWAY_VIEWER_PROXY_KEY = "synthetic-private-viewer-proxy-key";
+      await stopGateway(); startGateway(); await waitForGateway();
+      for (const path of ["/view", "/api/viewer/snapshot", "/api/viewer/events"]) {
+        assert.equal((await request(path, "GET", undefined, anonymous)).status, 403);
+        assert.equal((await request(path, "GET", undefined, { ...anonymous, "tailscale-user-login": "owner@example.invalid", "x-forwarded-for": "100.64.1.1" })).status, 403);
+      }
+      const proxied = { ...anonymous, "x-mcp-gateway-viewer-key": env.MCP_GATEWAY_VIEWER_PROXY_KEY };
+      assert.equal((await request("/view", "GET", undefined, proxied)).status, 200);
+      assert.equal((await request("/api/viewer/snapshot", "GET", undefined, proxied)).status, 200);
+      assert.equal((await request("/api/viewer/events", "HEAD", undefined, proxied)).status, 200);
+      assert.equal((await request("/api/servers", "GET", undefined, proxied)).status, 401);
+    } finally {
+      await stopGateway(); delete env.MCP_GATEWAY_VIEWER_ORIGINS; delete env.MCP_GATEWAY_VIEWER_PROXY_KEY; startGateway(); await waitForGateway();
+    }
+    assert.equal((await request("/api/viewer/snapshot", "GET", undefined, anonymous)).status, 404);
   });
 
   await t.test("browser sign-in issues a revocable session and protects mutations from cross-origin requests", async () => {
